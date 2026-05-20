@@ -1,0 +1,129 @@
+name: openchami-sandbox
+
+# 8 Redfish BMC emulators (sushy-tools) + 1 ipmi_sim.
+#
+# Replaced csm-rie 2026-05-18: the CSM Shasta mockups ship without
+# Chassis.Links.ComputerSystems (or the reciprocal Systems.Links.Chassis),
+# so magellan's dual-walk merge — Chassis-tree harvest + ServiceRoot.Systems
+# direct read — errored out with "src and dst must be of same type" at
+# pkg/collect.go:114. CSM-RIE is itself no longer fully supported upstream;
+# sushy-tools' --fake driver is the Metal3/Ironic-pedigree replacement and
+# populates the Chassis ↔ System link graph the way real Redfish BMCs do.
+#
+# Each container serves HTTPS on :443 (matching the real-BMC convention so
+# the magellan/uc6 URL shapes stay untouched). The entrypoint generates a
+# self-signed cert at startup — no cert-manager dependency, no shared-volume
+# state, ephemeral by design. sushy-tools' --fake driver synthesises a
+# single ComputerSystem with a default UUID; SMD's V2 parser derives the
+# node xname from ordinal position (the first System inside BMC x0c0s0b0
+# becomes x0c0s0b0n0), so the UUID is invisible to the rest of the stack.
+#
+# Only redfish-bmc-0 is published to host (port 5000 → container 443) for
+# human curl smoke tests + the bmcsim_test.go suite.
+
+networks:
+  default:
+    name: openchami-sandbox
+    external: true
+
+x-redfish-bmc: &redfish-bmc
+  image: ${SBX_SUSHY_IMAGE:-quay.io/metal3-io/sushy-tools:latest}
+  # Image runs as root (verified) so binding :443 is fine without
+  # CAP_NET_BIND_SERVICE. Entrypoint generates a throwaway TLS cert
+  # then exec's sushy-emulator. Power-state changes in --fake mode
+  # apply after a randomised 1-11s delay (a deliberate "hardware
+  # actions are not immediate" behaviour in sushy_tools); UC6's
+  # transition poll loop tolerates this comfortably.
+  entrypoint: ["/bin/bash", "-c"]
+  command:
+    - |
+      set -e
+      mkdir -p /tmp/tls
+      openssl req -x509 -newkey rsa:2048 -nodes \
+        -keyout /tmp/tls/key.pem -out /tmp/tls/cert.pem \
+        -days 365 -subj "/CN=${HOSTNAME}" 2>/dev/null
+      exec sushy-emulator --fake -i :: -p 443 \
+        --ssl-certificate /tmp/tls/cert.pem \
+        --ssl-key /tmp/tls/key.pem
+  # In-container curl isn't available in the sushy-tools image, so the
+  # healthcheck is omitted. wait-for-stack.sh from the host polls
+  # https://127.0.0.1:5000/redfish/v1 on the published-port BMC, which
+  # is the load-bearing signal for "the layer is up" anyway.
+  restart: unless-stopped
+
+services:
+  redfish-bmc-0:
+    <<: *redfish-bmc
+    container_name: sandbox-redfish-0
+    hostname: x0c0s0b0
+    networks:
+      default:
+        aliases: [x0c0s0b0]
+    ports:
+      - "127.0.0.1:5000:443"
+
+  redfish-bmc-1:
+    <<: *redfish-bmc
+    container_name: sandbox-redfish-1
+    hostname: x0c0s1b0
+    networks:
+      default:
+        aliases: [x0c0s1b0]
+
+  redfish-bmc-2:
+    <<: *redfish-bmc
+    container_name: sandbox-redfish-2
+    hostname: x0c0s2b0
+    networks:
+      default:
+        aliases: [x0c0s2b0]
+
+  redfish-bmc-3:
+    <<: *redfish-bmc
+    container_name: sandbox-redfish-3
+    hostname: x0c0s3b0
+    networks:
+      default:
+        aliases: [x0c0s3b0]
+
+  redfish-bmc-4:
+    <<: *redfish-bmc
+    container_name: sandbox-redfish-4
+    hostname: x0c0s4b0
+    networks:
+      default:
+        aliases: [x0c0s4b0]
+
+  redfish-bmc-5:
+    <<: *redfish-bmc
+    container_name: sandbox-redfish-5
+    hostname: x0c0s5b0
+    networks:
+      default:
+        aliases: [x0c0s5b0]
+
+  redfish-bmc-6:
+    <<: *redfish-bmc
+    container_name: sandbox-redfish-6
+    hostname: x0c0s6b0
+    networks:
+      default:
+        aliases: [x0c0s6b0]
+
+  redfish-bmc-7:
+    <<: *redfish-bmc
+    container_name: sandbox-redfish-7
+    hostname: x0c0s7b0
+    networks:
+      default:
+        aliases: [x0c0s7b0]
+
+  ipmi-bmc-0:
+    image: ${SBX_IPMI_SIM_IMAGE:-openchami/ipmi-sim:dev}
+    container_name: sandbox-ipmi-0
+    hostname: x0c0s0b0-ipmi
+    networks:
+      default:
+        aliases: [x0c0s0b0-ipmi]
+    # Note: 623/udp is NOT published to host — only reachable from inside the docker network.
+    restart: unless-stopped

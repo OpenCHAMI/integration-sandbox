@@ -1,0 +1,12 @@
+{
+  "Components": [
+    { "ID": "x0c0s0b0n0", "Type": "Node", "State": "On",  "Flag": "OK", "Enabled": true, "Role": "Compute", "NID": 1000 },
+    { "ID": "x0c0s1b0n0", "Type": "Node", "State": "On",  "Flag": "OK", "Enabled": true, "Role": "Compute", "NID": 1001 },
+    { "ID": "x0c0s2b0n0", "Type": "Node", "State": "On",  "Flag": "OK", "Enabled": true, "Role": "Compute", "NID": 1002 },
+    { "ID": "x0c0s3b0n0", "Type": "Node", "State": "Off", "Flag": "OK", "Enabled": true, "Role": "Compute", "NID": 1003 },
+    { "ID": "x0c0s4b0n0", "Type": "Node", "State": "Off", "Flag": "OK", "Enabled": true, "Role": "Compute", "NID": 1004 },
+    { "ID": "x0c0s5b0n0", "Type": "Node", "State": "Off", "Flag": "OK", "Enabled": true, "Role": "Compute", "NID": 1005 },
+    { "ID": "x0c0s6b0n0", "Type": "Node", "State": "Off", "Flag": "OK", "Enabled": true, "Role": "Compute", "NID": 1006 },
+    { "ID": "x0c0s7b0n0", "Type": "Node", "State": "Off", "Flag": "OK", "Enabled": true, "Role": "Compute", "NID": 1007 }
+  ]
+}

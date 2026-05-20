@@ -1,0 +1,167 @@
+name: openchami-sandbox
+
+# OpenCHAMI services. Most images are distroless and ship NO healthcheck tools
+# (no curl, no wget). For those we omit the in-container healthcheck and rely on
+# scripts/wait-for-stack.sh to poll /health from the host.
+#
+# Where the image has curl (smd, tokensmith) we use it. Otherwise no HEALTHCHECK
+# directive — depends_on uses service_started.
+#
+# All services share the openchami-sandbox network so they can reach BMC sims via xname.
+
+networks:
+  default:
+    name: openchami-sandbox
+    external: true
+
+services:
+  smd:
+    image: ${SBX_SMD_IMAGE:-ghcr.io/openchami/smd:2.17}
+    container_name: sandbox-smd
+    command:
+      - "/smd"
+      - "-dbhost=postgres"
+      - "-dbport=5432"
+      - "-dbuser=openchami"
+      - "-dbname=smd"
+      - "-dbtype=postgres"
+      - "-dbopts=password=openchami sslmode=disable"
+      - "-migrate"
+      # Discovery stays OFF (the new v2.19+ default). SMD's internal
+      # discovery walker is a CSM-era legacy path; in OpenCHAMI,
+      # magellan does BMC walks client-side and POSTs the discovered
+      # ComponentEndpoint/HardwareInventory data back to SMD via the
+      # ingest API. See compose/core.yaml::magellan-runner.
+      - "-http-listen=:27779"
+      - "-log=2"
+    ports:
+      - "127.0.0.1:27779:27779"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:27779/hsm/v2/service/ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+    restart: unless-stopped
+
+  tokensmith:
+    image: ${SBX_TOKENSMITH_IMAGE:-ghcr.io/openchami/tokensmith:latest}
+    container_name: sandbox-tokensmith
+    entrypoint: ["/sbin/tini", "--"]
+    command:
+      - "tokensmith"
+      - "serve"
+      - "--port=27780"
+      - "--issuer=http://tokensmith:27780"
+      - "--cluster-id=sandbox"
+      - "--openchami-id=sandbox"
+      - "--key-dir=/tokensmith/keys"
+      - "--rfc8693-bootstrap-store=/tokensmith/data/bootstrap-tokens"
+      - "--rfc8693-refresh-store=/tokensmith/data/refresh-tokens"
+      - "--enable-local-user-mint"
+      - "--non-enforcing"
+    environment:
+      TOKENSMITH_CONFIG: ""
+    tmpfs:
+      - /tokensmith/keys:mode=1777
+      - /tokensmith/data:mode=1777
+    ports:
+      - "127.0.0.1:27780:27780"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:27780/.well-known/jwks.json"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+  boot-service:
+    image: ${SBX_BOOT_IMAGE:-ghcr.io/openchami/boot-service:latest}
+    container_name: sandbox-boot
+    # If both hsm-url and tokensmith-url are set, boot-service requires a
+    # bootstrap token. For the sandbox we run with auth disabled and only
+    # the HSM URL configured, so token exchange is skipped.
+    environment:
+      BOOT_SERVICE_PORT: "27791"
+      BOOT_SERVICE_HOST: "0.0.0.0"
+      BOOT_SERVICE_ENABLE_AUTH: "false"
+      BOOT_SERVICE_HSM_URL: "http://smd:27779"
+    depends_on:
+      smd:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:27791:27791"
+    # distroless image — no healthcheck tools available; wait-for-stack.sh covers it
+    restart: unless-stopped
+
+  metadata-service:
+    image: ${SBX_METADATA_IMAGE:-ghcr.io/openchami/metadata-service:latest}
+    container_name: sandbox-metadata
+    command: ["serve", "--port", "27792"]
+    environment:
+      SMD_URL: "http://smd:27779"
+    # The image runs as a non-root user with a read-only filesystem
+    # root, so --data-dir defaults to /data but mkdir /data fails with
+    # permission denied. Mount a writable tmpfs there — same pattern
+    # fru-tracker uses below. Ephemeral storage is correct for the
+    # sandbox: any reconcile state comes from SMD on restart.
+    tmpfs:
+      - /data:mode=1777
+    depends_on:
+      smd:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:27792:27792"
+    restart: unless-stopped
+
+  fru-tracker:
+    image: ${SBX_FRU_IMAGE:-ghcr.io/openchami/fru-tracker:latest}
+    container_name: sandbox-fru
+    command:
+      - "serve"
+      - "--port=27793"
+      - "--database-url=file:/data/fru.db?cache=shared&_fk=1"
+    tmpfs:
+      - /data:mode=1777
+    ports:
+      - "127.0.0.1:27793:27793"
+    restart: unless-stopped
+
+  power-control:
+    image: ${SBX_POWER_IMAGE:-ghcr.io/openchami/power-control:latest}
+    container_name: sandbox-power
+    # power-control's Vault credstore (HMS hms-securestorage) only authenticates
+    # to Vault via the K8s service-account JWT flow — VAULT_TOKEN is ignored.
+    # Outside Kubernetes that path always fails. Use the upstream
+    # --fake-vault-enabled escape hatch instead, with PCS_FAKE_VAULT_REDFISH_*
+    # supplying root creds for every BMC. This matches what the BMC sims
+    # actually accept (see compose/bmc-sim.yaml AUTH_CONFIG).
+    # The HSMLOCK_ENABLED env var has no binding in v2 of power-control — the
+    # only switch is the --hsmlock-enabled flag (default true). HSM reservation
+    # locking is healthy against this SMD, so leave it on. Use --hsmlock-enabled=false
+    # only if you've verified upstream removed the bug where the false branch
+    # marks every component "Unable to reserve component".
+    command: ["/usr/local/bin/power-control", "--fake-vault-enabled"]
+    environment:
+      PCS_FAKE_VAULT_REDFISH_USER: "root"
+      PCS_FAKE_VAULT_REDFISH_PASSWORD: "root_password"
+      SMS_SERVER: "http://smd:27779"
+      STORAGE: "MEMORY"
+      LOG_LEVEL: "DEBUG"
+      SERVICE_RESERVATION_VERBOSITY: "TRACE"
+      TRS_IMPLEMENTATION: "LOCAL"
+    depends_on:
+      smd:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:28007:28007"
+    # busybox without wget/curl in this image — no in-container healthcheck
+    restart: unless-stopped
+
+  # one-shot helper container that runs `magellan` against the BMC sims.
+  magellan-runner:
+    image: ${SBX_MAGELLAN_IMAGE:-ghcr.io/openchami/magellan:latest}
+    container_name: sandbox-magellan-runner
+    profiles: ["tools"]
+    environment:
+      MASTER_KEY: "00000000000000000000000000000000"
+    entrypoint: ["/magellan"]
+    command: ["--help"]

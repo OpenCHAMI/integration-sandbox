@@ -1,0 +1,60 @@
+# Copyright © 2026 OpenCHAMI a Series of LF Projects, LLC
+#
+# SPDX-License-Identifier: MIT
+
+version = 1
+SPDX-PackageName = "integration-sandbox"
+SPDX-PackageDownloadLocation = "https://github.com/OpenCHAMI/integration-sandbox"
+
+# Go test sources.
+[[annotations]]
+path = "**/**.go"
+precedence = "aggregate"
+SPDX-FileCopyrightText = "Copyright © 2026 OpenCHAMI a Series of LF Projects, LLC"
+SPDX-License-Identifier = "MIT"
+
+# Compose stacks, fixtures, image manifests, scripts, bats tests.
+[[annotations]]
+path = [
+  "compose/**",
+  "fixtures/**",
+  "images/**",
+  "scripts/**",
+  "tests/bats/**",
+]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "Copyright © 2026 OpenCHAMI a Series of LF Projects, LLC"
+SPDX-License-Identifier = "MIT"
+
+# Module + lock files (no header support).
+[[annotations]]
+path = ["tests/go.mod", "tests/go.sum", "Makefile"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "Copyright © 2026 OpenCHAMI a Series of LF Projects, LLC"
+SPDX-License-Identifier = "MIT"
+
+# Repo-root metadata + dotfiles.
+[[annotations]]
+path = [
+  ".gitignore",
+  ".pre-commit-config.yaml",
+  ".claude/**",
+]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "Copyright © 2026 OpenCHAMI a Series of LF Projects, LLC"
+SPDX-License-Identifier = "MIT"
+
+# Markdown documentation.
+[[annotations]]
+path = "**.md"
+precedence = "aggregate"
+SPDX-FileCopyrightText = "Copyright © 2026 OpenCHAMI a Series of LF Projects, LLC"
+SPDX-License-Identifier = "MIT"
+
+# Run-time append-only state files (never under version control, but lint
+# them as CC0 in case a developer commits a snapshot for triage).
+[[annotations]]
+path = ["PROGRESS.log", "STATUS", "logs/**"]
+precedence = "override"
+SPDX-FileCopyrightText = "NONE"
+SPDX-License-Identifier = "CC0-1.0"

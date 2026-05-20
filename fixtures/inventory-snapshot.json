@@ -1,0 +1,35 @@
+{
+  "snapshotId": "sandbox-snapshot-0001",
+  "discoveredAt": "2026-05-03T10:00:00Z",
+  "source": "magellan",
+  "devices": [
+    {
+      "xname": "x0c0s0b0",
+      "kind": "BMC",
+      "manufacturer": "OpenCHAMI Sandbox",
+      "model": "csm-rie",
+      "serialNumber": "BMC-0",
+      "children": [
+        {
+          "xname": "x0c0s0b0n0",
+          "kind": "Node",
+          "serialNumber": "NODE-0",
+          "components": [
+            { "kind": "DIMM", "serialNumber": "DIMM-0-A", "sizeBytes": 17179869184 },
+            { "kind": "CPU",  "serialNumber": "CPU-0",   "model": "OpenCHAMI vCPU" }
+          ]
+        }
+      ]
+    },
+    {
+      "xname": "x0c0s1b0",
+      "kind": "BMC",
+      "manufacturer": "OpenCHAMI Sandbox",
+      "model": "csm-rie",
+      "serialNumber": "BMC-1",
+      "children": [
+        { "xname": "x0c0s1b0n0", "kind": "Node", "serialNumber": "NODE-1" }
+      ]
+    }
+  ]
+}

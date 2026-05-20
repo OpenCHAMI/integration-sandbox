@@ -1,0 +1,27 @@
+# Append-only run-time state — regenerated on every `make ci`.
+PROGRESS.log
+STATUS
+BLOCKED.md
+
+# Per-failure log bundles.
+logs/
+
+# Local Claude scratch / settings overrides.
+.claude/settings.local.json
+
+# Go test artefacts.
+*.test
+*.out
+coverage.txt
+
+# IDE / editor.
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Backup module files.
+tests/go.mod.bak
+tests/go.sum.bak

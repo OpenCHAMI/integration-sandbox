@@ -1,0 +1,51 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(docker:*)",
+      "Bash(docker compose:*)",
+      "Bash(go:*)",
+      "Bash(make:*)",
+      "Bash(curl:*)",
+      "Bash(vault:*)",
+      "Bash(awslocal:*)",
+      "Bash(jq:*)",
+      "Bash(yq:*)",
+      "Bash(kubectl:*)",
+      "Bash(helm:*)",
+      "Bash(kind:*)",
+      "Bash(bats:*)",
+      "Bash(sqlite3:*)",
+      "Bash(psql:*)",
+      "Bash(redis-cli:*)",
+      "Bash(mkdir:*)",
+      "Bash(ls:*)",
+      "Bash(grep:*)",
+      "Bash(find:*)",
+      "Bash(printf:*)",
+      "Bash(cat:*)",
+      "Bash(tail:*)",
+      "Bash(head:*)",
+      "Bash(./scripts/*)",
+      "Bash(bash scripts/*)",
+      "Bash(setup-envtest:*)"
+    ],
+    "deny": [
+      "Bash(rm -rf /:*)",
+      "Bash(sudo rm:*)",
+      "Bash(git push:*)",
+      "Bash(git reset --hard:*)",
+      "Bash(kind delete:*)"
+    ],
+    "ask": [
+      "Bash(sudo:*)"
+    ]
+  },
+  "env": {
+    "VAULT_ADDR": "http://127.0.0.1:8200",
+    "VAULT_TOKEN": "dev-root-token",
+    "AWS_ACCESS_KEY_ID": "test",
+    "AWS_SECRET_ACCESS_KEY": "test",
+    "AWS_DEFAULT_REGION": "us-east-1",
+    "AWS_ENDPOINT_URL": "http://127.0.0.1:4566"
+  }
+}

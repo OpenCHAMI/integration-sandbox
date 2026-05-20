@@ -1,0 +1,11 @@
+{
+  "issuer": "http://tokensmith:27780",
+  "cluster_id": "sandbox",
+  "openchami_id": "sandbox",
+  "port": 27780,
+  "key_dir": "/tokensmith/keys",
+  "rfc8693_bootstrap_store": "/tokensmith/data/bootstrap-tokens",
+  "rfc8693_refresh_store": "/tokensmith/data/refresh-tokens",
+  "non_enforcing": true,
+  "enable_local_user_mint": true
+}

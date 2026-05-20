@@ -1,0 +1,12 @@
+{
+  "RedfishEndpoints": [
+    { "ID": "x0c0s0b0", "FQDN": "x0c0s0b0", "User": "root", "Password": "root_password", "Enabled": true, "RediscoverOnUpdate": true },
+    { "ID": "x0c0s1b0", "FQDN": "x0c0s1b0", "User": "root", "Password": "root_password", "Enabled": true, "RediscoverOnUpdate": true },
+    { "ID": "x0c0s2b0", "FQDN": "x0c0s2b0", "User": "root", "Password": "root_password", "Enabled": true, "RediscoverOnUpdate": true },
+    { "ID": "x0c0s3b0", "FQDN": "x0c0s3b0", "User": "root", "Password": "root_password", "Enabled": true, "RediscoverOnUpdate": true },
+    { "ID": "x0c0s4b0", "FQDN": "x0c0s4b0", "User": "root", "Password": "root_password", "Enabled": true, "RediscoverOnUpdate": true },
+    { "ID": "x0c0s5b0", "FQDN": "x0c0s5b0", "User": "root", "Password": "root_password", "Enabled": true, "RediscoverOnUpdate": true },
+    { "ID": "x0c0s6b0", "FQDN": "x0c0s6b0", "User": "root", "Password": "root_password", "Enabled": true, "RediscoverOnUpdate": true },
+    { "ID": "x0c0s7b0", "FQDN": "x0c0s7b0", "User": "root", "Password": "root_password", "Enabled": true, "RediscoverOnUpdate": true }
+  ]
+}

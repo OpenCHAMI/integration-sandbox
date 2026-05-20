@@ -1,0 +1,95 @@
+# Copyright © 2026 OpenCHAMI a Series of LF Projects, LLC
+#
+# SPDX-License-Identifier: MIT
+#
+# Example GitHub Actions workflow that runs the integration sandbox against
+# the published images, with optional PR-build overrides.
+#
+# This file is *not* the sandbox repo's own CI (see ci.yaml for that).
+# Copy it into a consumer service repo as .github/workflows/sandbox.yml,
+# then adapt the IMAGES selection / override matrix to taste. The consumer
+# repo's checkout step should point at OpenCHAMI/integration-sandbox so
+# the `working-directory: integration-sandbox` step below resolves.
+
+name: integration-sandbox
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+    inputs:
+      images:
+        description: "Manifest under integration-sandbox/images/"
+        type: string
+        default: "default"
+      tokensmith_image:
+        description: "Override SBX_TOKENSMITH_IMAGE (e.g. ghcr.io/openchami/tokensmith:pr-23)"
+        type: string
+        default: ""
+      boot_image:
+        description: "Override SBX_BOOT_IMAGE"
+        type: string
+        default: ""
+
+jobs:
+  ci:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out the consumer repo (the service under test)
+        uses: actions/checkout@v4
+        with:
+          path: service
+          fetch-depth: 0
+
+      - name: Check out the sandbox harness
+        uses: actions/checkout@v4
+        with:
+          repository: OpenCHAMI/integration-sandbox
+          path: integration-sandbox
+          # Optional: pin to a sandbox release tag instead of main.
+          # ref: v1.0.0
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.6"
+
+      - name: Install bats
+        run: sudo apt-get update && sudo apt-get install -y bats
+
+      - name: Log in to GHCR (read-only)
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Pick the manifest. PR runs use the matrix; manual runs use the input.
+      - name: Compute image overrides
+        id: imgs
+        run: |
+          set -e
+          echo "IMAGES=${{ inputs.images || 'default' }}" >> "$GITHUB_ENV"
+          if [ -n "${{ inputs.tokensmith_image }}" ]; then
+            echo "SBX_TOKENSMITH_IMAGE=${{ inputs.tokensmith_image }}" >> "$GITHUB_ENV"
+          fi
+          if [ -n "${{ inputs.boot_image }}" ]; then
+            echo "SBX_BOOT_IMAGE=${{ inputs.boot_image }}" >> "$GITHUB_ENV"
+          fi
+
+      # If this workflow is hosted in one of the service repos and triggered by a PR,
+      # auto-pin THAT service to the PR build:
+      #   SBX_TOKENSMITH_IMAGE=ghcr.io/openchami/tokensmith:pr-${{ github.event.pull_request.number }}
+      # (uncomment as needed)
+
+      - name: make ci
+        working-directory: integration-sandbox
+        run: make ci
+
+      - name: Upload log bundle on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sandbox-logs
+          path: integration-sandbox/logs/

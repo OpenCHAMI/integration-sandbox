@@ -1,0 +1,11 @@
+{
+  "default": {
+    "Kernel": "s3://boot-images/sandbox-kernel",
+    "Initrd": "s3://boot-images/sandbox-initrd",
+    "Params": "console=ttyS0 root=live:s3://boot-images/sandbox-rootfs.squashfs ip=dhcp"
+  },
+  "perNode": [
+    { "ID": "x0c0s0b0n0", "Params": "console=ttyS0 hostname=node0 ip=dhcp" },
+    { "ID": "x0c0s1b0n0", "Params": "console=ttyS0 hostname=node1 ip=dhcp" }
+  ]
+}
