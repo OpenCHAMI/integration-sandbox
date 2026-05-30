@@ -126,7 +126,7 @@ services:
     restart: unless-stopped
 
   power-control:
-    image: ${SBX_POWER_IMAGE:-ghcr.io/openchami/power-control:latest}
+    image: ${SBX_POWER_IMAGE:-ghcr.io/openchami/pcs:pr-68}
     container_name: sandbox-power
     # power-control's Vault credstore (HMS hms-securestorage) only authenticates
     # to Vault via the K8s service-account JWT flow — VAULT_TOKEN is ignored.

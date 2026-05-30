@@ -1,6 +1,7 @@
 # OpenCHAMI integration sandbox
 
 [![REUSE compliant](https://api.reuse.software/badge/github.com/OpenCHAMI/integration-sandbox)](https://api.reuse.software/info/github.com/OpenCHAMI/integration-sandbox)
+[![CI](https://github.com/OpenCHAMI/integration-sandbox/actions/workflows/ci.yml/badge.svg)](https://github.com/OpenCHAMI/integration-sandbox/actions/workflows/ci.yml)
 
 A docker-compose-driven, BMC-less, end-to-end test harness for the
 OpenCHAMI microservices. Single-command run, idempotent, no real hardware
@@ -57,15 +58,17 @@ Reference cards:
 **Tests.** A standalone Go module under `tests/` (build tag `integration`)
 plus a thin `bats` smoke layer. Seven named cross-service use cases:
 
-| UC | Services exercised | What it asserts |
-|---|---|---|
-| UC1 | SMD, boot-service, metadata-service | Populate SMD with nodes; node visibility chain through boot/metadata, with cloud-init lookup. |
-| UC2 | boot-service, metadata-service | Two clusters with disjoint node sets; move a node between them; membership reflects on both services. |
-| UC3 | All 9 services | Restart each container in turn (k8s-style); re-confirm node visibility and cross-service health. |
-| UC4 | tokensmith, SMD | RFC 8693 bootstrap-token mint + token exchange; JWKS signature verification; authenticated SMD write round-trips through postgres. |
-| UC5 | magellan, csm-rie, SMD | Run the documented `magellan scan → collect → send` pipeline against the 8 BMC sims; verify SMD's `/Inventory/RedfishEndpoints` reflects the discovered fleet. |
-| UC6 | power-control, SMD, csm-rie | POST a `force-off`/`on` transition; observe `PowerState` mutation on the BMC sim via an independent Redfish read; reverse and re-verify. |
-| UC7 | fru-tracker | POST a 32-device discovery snapshot (8 nodes × CPU + 2 DIMMs); poll until reconciler completes; verify parent/child UID linkage in the device tree. |
+| UC | Services exercised | What it asserts | Status |
+|----|-------------------|-----------------|--------|
+| [UC1](docs/use-cases/uc1-node-visibility.md) | SMD, boot-service, metadata-service | Populate SMD with nodes; node visibility chain through boot/metadata, with cloud-init lookup. | [![UC1](https://github.com/OpenCHAMI/integration-sandbox/actions/workflows/ci.yml/badge.svg?event=push)](https://github.com/OpenCHAMI/integration-sandbox/actions/workflows/ci.yml) |
+| [UC2](docs/use-cases/uc2-multi-cluster.md) | boot-service, metadata-service | Two clusters with disjoint node sets; move a node between them; membership reflects on both services. | [![UC2](https://github.com/OpenCHAMI/integration-sandbox/actions/workflows/ci.yml/badge.svg?event=push)](https://github.com/OpenCHAMI/integration-sandbox/actions/workflows/ci.yml) |
+| [UC3](docs/use-cases/uc3-restart-resilience.md) | All 9 services | Restart each container in turn (k8s-style); re-confirm node visibility and cross-service health. | [![UC3](https://github.com/OpenCHAMI/integration-sandbox/actions/workflows/ci.yml/badge.svg?event=push)](https://github.com/OpenCHAMI/integration-sandbox/actions/workflows/ci.yml) |
+| [UC4](docs/use-cases/uc4-tokensmith-smd.md) | tokensmith, SMD | RFC 8693 bootstrap-token mint + token exchange; JWKS signature verification; authenticated SMD write round-trips through postgres. | [![UC4](https://github.com/OpenCHAMI/integration-sandbox/actions/workflows/ci.yml/badge.svg?event=push)](https://github.com/OpenCHAMI/integration-sandbox/actions/workflows/ci.yml) |
+| [UC5](docs/use-cases/uc5-magellan-scan.md) | magellan, csm-rie, SMD | Run the documented `magellan scan → collect → send` pipeline against the 8 BMC sims; verify SMD's `/Inventory/RedfishEndpoints` reflects the discovered fleet. | [![UC5](https://github.com/OpenCHAMI/integration-sandbox/actions/workflows/ci.yml/badge.svg?event=push)](https://github.com/OpenCHAMI/integration-sandbox/actions/workflows/ci.yml) |
+| [UC6](docs/use-cases/uc6-power-redfish.md) | power-control, SMD, csm-rie | POST a `force-off`/`on` transition; observe `PowerState` mutation on the BMC sim via an independent Redfish read; reverse and re-verify. | [![UC6](https://github.com/OpenCHAMI/integration-sandbox/actions/workflows/ci.yml/badge.svg?event=push)](https://github.com/OpenCHAMI/integration-sandbox/actions/workflows/ci.yml) |
+| [UC7](docs/use-cases/uc7-fru-discovery.md) | fru-tracker | POST a 32-device discovery snapshot (8 nodes × CPU + 2 DIMMs); poll until reconciler completes; verify parent/child UID linkage in the device tree. | [![UC7](https://github.com/OpenCHAMI/integration-sandbox/actions/workflows/ci.yml/badge.svg?event=push)](https://github.com/OpenCHAMI/integration-sandbox/actions/workflows/ci.yml) |
+
+📄 **[Detailed use case documentation →](docs/use-cases/)**
 
 **Stub-resistance.** Every UC is built so a wiremock or canned-response
 stub would fail it. UC4 uses cryptographic JWT verification + a stateful
@@ -104,6 +107,41 @@ into the consumer repo, set the relevant `SBX_<NAME>_IMAGE` to your PR
 build (`ghcr.io/openchami/<svc>:pr-${{ github.event.pull_request.number }}`),
 and the harness checks your PR against the rest of the fleet. See
 [`docs/ci-integration.md`](docs/ci-integration.md) for full examples.
+
+## GitHub Actions workflow
+
+The CI workflow (`.github/workflows/ci.yml`) runs automatically on:
+- Every push to `main`
+- Every pull request
+- Daily at 06:00 UTC (drift detection against floating `:main` tags)
+- Manual workflow dispatch
+
+**Manual runs** expose UI inputs for:
+- `SKIP_SIM` — skip building/starting ipmi-sim and remote-console (default: `true`)
+- `IMAGES` — manifest selection (`release` | `default` | `edge` | `release-v1.0`)
+- `SBX_*_IMAGE` — override any of the 12 service images
+
+Each use case runs as a **separate, traceable job** with:
+- Independent artifact upload (logs retained for 30 days)
+- Job summary with pass/fail status and links to documentation
+- Sequential execution to avoid accidental interference
+
+**Local testing with act:**
+```bash
+# Install act (GitHub Actions simulator)
+brew install act  # or see https://github.com/nektos/act
+
+# List all jobs without running
+act --list
+
+# Run a single use case locally
+act -j test-uc1
+
+# Run the full workflow
+act
+```
+
+See [`docs/MAKE_TO_ACTIONS_MAPPING.md`](docs/MAKE_TO_ACTIONS_MAPPING.md) for the complete mapping from `make ci` to the new workflow.
 
 ## Donts (read before extending)
 

@@ -1,0 +1,1006 @@
+# Copyright © 2026 OpenCHAMI a Series of LF Projects, LLC
+#
+# SPDX-License-Identifier: MIT
+#
+# OpenCHAMI Integration Sandbox CI
+#
+# This workflow replaces the monolithic `make ci` with explicit, traceable jobs
+# for each use case (UC1-UC7). Jobs run sequentially to avoid accidental
+# interference. Each job uploads its own artifacts and reports status.
+#
+# The workflow exposes:
+# - SKIP_SIM: skip building/starting ipmi-sim and remote-console
+# - SBX_*_IMAGE: override any service image (e.g., for PR builds)
+# - IMAGES: manifest selection (release | default | edge | release-v1.0)
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Daily 06:00 UTC - drift detection against floating tags
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+    inputs:
+      images:
+        description: "Manifest under images/ (release | default | edge | release-v1.0)"
+        type: string
+        default: "release"
+      skip_sim:
+        description: "Skip building and starting ipmi-sim / remote-console"
+        type: boolean
+        default: true
+      sbx_vault_image:
+        description: "Override Vault image"
+        type: string
+        default: ""
+      sbx_localstack_image:
+        description: "Override LocalStack image"
+        type: string
+        default: ""
+      sbx_postgres_image:
+        description: "Override Postgres image"
+        type: string
+        default: ""
+      sbx_sushy_image:
+        description: "Override csm-rie (Redfish emulator) image"
+        type: string
+        default: ""
+      sbx_ipmi_sim_image:
+        description: "Override ipmi_sim image"
+        type: string
+        default: ""
+      sbx_smd_image:
+        description: "Override SMD image"
+        type: string
+        default: ""
+      sbx_tokensmith_image:
+        description: "Override tokensmith image"
+        type: string
+        default: ""
+      sbx_boot_image:
+        description: "Override boot-service image"
+        type: string
+        default: ""
+      sbx_metadata_image:
+        description: "Override metadata-service image"
+        type: string
+        default: ""
+      sbx_fru_image:
+        description: "Override fru-tracker image"
+        type: string
+        default: ""
+      sbx_power_image:
+        description: "Override power-control image"
+        type: string
+        default: ""
+      sbx_magellan_image:
+        description: "Override magellan-runner image"
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+  packages: read
+
+env:
+  IMAGES: ${{ inputs.images || 'release' }}
+  SKIP_SIM: ${{ inputs.skip_sim || 'true' }}
+  SBX_VAULT_IMAGE: ${{ inputs.sbx_vault_image }}
+  SBX_LOCALSTACK_IMAGE: ${{ inputs.sbx_localstack_image }}
+  SBX_POSTGRES_IMAGE: ${{ inputs.sbx_postgres_image }}
+  SBX_SUSHY_IMAGE: ${{ inputs.sbx_sushy_image }}
+  SBX_IPMI_SIM_IMAGE: ${{ inputs.sbx_ipmi_sim_image }}
+  SBX_SMD_IMAGE: ${{ inputs.sbx_smd_image }}
+  SBX_TOKENSMITH_IMAGE: ${{ inputs.sbx_tokensmith_image }}
+  SBX_BOOT_IMAGE: ${{ inputs.sbx_boot_image }}
+  SBX_METADATA_IMAGE: ${{ inputs.sbx_metadata_image }}
+  SBX_FRU_IMAGE: ${{ inputs.sbx_fru_image }}
+  SBX_POWER_IMAGE: ${{ inputs.sbx_power_image }}
+  SBX_MAGELLAN_IMAGE: ${{ inputs.sbx_magellan_image }}
+
+jobs:
+  # ──────────────────────────────────────────────────────────────────────────
+  # Setup: checkout, Go, Docker BuildKit, bats
+  # ──────────────────────────────────────────────────────────────────────────
+  setup:
+    name: Setup environment
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: tests/go.mod
+          cache: true
+          cache-dependency-path: tests/go.sum
+
+      - name: Install bats
+        run: sudo apt-get update && sudo apt-get install -y bats
+
+      - name: Set up Docker Buildx
+        if: github.event_name != 'act'
+        uses: docker/setup-buildx-action@v3
+        continue-on-error: true
+
+      - name: Log in to GHCR (read-only)
+        if: github.event_name != 'act'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: true
+
+      - name: Show resolved image manifest
+        run: make show-images
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Build: pull/build images (respects SKIP_SIM)
+  # ──────────────────────────────────────────────────────────────────────────
+  build-images:
+    name: Build/pull images
+    needs: setup
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Docker Buildx
+        if: github.event_name != 'act'
+        uses: docker/setup-buildx-action@v3
+        continue-on-error: true
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: true
+
+      - name: Build/pull images
+        run: bash scripts/build-images.sh
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Infrastructure: Vault, LocalStack S3, Postgres
+  # ──────────────────────────────────────────────────────────────────────────
+  infra-up:
+    name: Start infrastructure
+    needs: build-images
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        if: github.event_name != 'act'
+        uses: docker/setup-buildx-action@v3
+        continue-on-error: true
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: true
+
+      - name: Pull images again (fresh runner)
+        run: bash scripts/build-images.sh
+
+      - name: Start infra stack
+        run: docker compose -f compose/infra.yaml up -d
+
+      - name: Wait for infra health
+        run: bash scripts/wait-for-stack.sh infra
+        timeout-minutes: 5
+
+      - name: Show infra status
+        if: always()
+        run: docker compose -f compose/infra.yaml ps
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # BMC simulators (optional, gated on SKIP_SIM)
+  # ──────────────────────────────────────────────────────────────────────────
+  bmc-sim-up:
+    name: Start BMC simulators
+    needs: infra-up
+    if: ${{ inputs.skip_sim != true && inputs.skip_sim != 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        if: github.event_name != 'act'
+        uses: docker/setup-buildx-action@v3
+        continue-on-error: true
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: true
+
+      - name: Pull images again
+        run: bash scripts/build-images.sh
+
+      - name: Start BMC sim stack
+        run: docker compose -f compose/infra.yaml -f compose/bmc-sim.yaml up -d
+
+      - name: Show BMC sim status
+        if: always()
+        run: docker compose -f compose/bmc-sim.yaml ps
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Core services: SMD, tokensmith, boot, metadata, fru, power, magellan
+  # ──────────────────────────────────────────────────────────────────────────
+  core-up:
+    name: Start core services
+    needs: [infra-up, bmc-sim-up]
+    if: always() && needs.infra-up.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        if: github.event_name != 'act'
+        uses: docker/setup-buildx-action@v3
+        continue-on-error: true
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: true
+
+      - name: Pull images again
+        run: bash scripts/build-images.sh
+
+      - name: Start core stack
+        run: docker compose -f compose/infra.yaml -f compose/bmc-sim.yaml -f compose/core.yaml up -d
+
+      - name: Wait for core services health
+        run: bash scripts/wait-for-stack.sh core
+        timeout-minutes: 5
+
+      - name: Show core status
+        if: always()
+        run: docker compose -f compose/core.yaml ps
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Seed: Vault, S3 buckets, SMD components
+  # ──────────────────────────────────────────────────────────────────────────
+  seed:
+    name: Seed fixtures
+    needs: core-up
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        if: github.event_name != 'act'
+        uses: docker/setup-buildx-action@v3
+        continue-on-error: true
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: true
+
+      - name: Pull images and start stack
+        run: |
+          bash scripts/build-images.sh
+          docker compose -f compose/infra.yaml -f compose/bmc-sim.yaml -f compose/core.yaml up -d
+
+      - name: Seed Vault
+        run: bash fixtures/vault-seed.sh
+        env:
+          VAULT_ADDR: http://127.0.0.1:8200
+          VAULT_TOKEN: dev-root-token
+
+      - name: Seed S3 buckets
+        run: bash fixtures/s3-buckets.sh
+        env:
+          AWS_ACCESS_KEY_ID: test
+          AWS_SECRET_ACCESS_KEY: test
+          AWS_DEFAULT_REGION: us-east-1
+          AWS_ENDPOINT_URL: http://127.0.0.1:4566
+
+      - name: Seed SMD
+        run: bash fixtures/seed-smd.sh
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # BATS smoke tests (run before integration tests per existing convention)
+  # ──────────────────────────────────────────────────────────────────────────
+  test-bats:
+    name: BATS smoke tests
+    needs: seed
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install bats
+        run: sudo apt-get update && sudo apt-get install -y bats
+
+      - name: Set up Docker Buildx
+        if: github.event_name != 'act'
+        uses: docker/setup-buildx-action@v3
+        continue-on-error: true
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: true
+
+      - name: Pull images and start stack
+        run: |
+          bash scripts/build-images.sh
+          docker compose -f compose/infra.yaml -f compose/bmc-sim.yaml -f compose/core.yaml up -d
+          bash fixtures/vault-seed.sh
+          bash fixtures/s3-buckets.sh
+          bash fixtures/seed-smd.sh
+        env:
+          VAULT_ADDR: http://127.0.0.1:8200
+          VAULT_TOKEN: dev-root-token
+          AWS_ACCESS_KEY_ID: test
+          AWS_SECRET_ACCESS_KEY: test
+          AWS_DEFAULT_REGION: us-east-1
+          AWS_ENDPOINT_URL: http://127.0.0.1:4566
+
+      - name: Run BATS tests
+        run: bats tests/bats/
+
+      - name: Upload BATS logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bats-logs-${{ github.run_id }}
+          path: logs/
+          retention-days: 30
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # UC1: Node visibility (SMD, boot-service, metadata-service)
+  # ──────────────────────────────────────────────────────────────────────────
+  test-uc1:
+    name: "UC1: Node visibility"
+    needs: test-bats
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: tests/go.mod
+          cache: true
+          cache-dependency-path: tests/go.sum
+
+      - name: Set up Docker Buildx
+        if: github.event_name != 'act'
+        uses: docker/setup-buildx-action@v3
+        continue-on-error: true
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: true
+
+      - name: Pull images and start stack
+        run: |
+          bash scripts/build-images.sh
+          docker compose -f compose/infra.yaml -f compose/bmc-sim.yaml -f compose/core.yaml up -d
+          bash fixtures/vault-seed.sh
+          bash fixtures/s3-buckets.sh
+          bash fixtures/seed-smd.sh
+        env:
+          VAULT_ADDR: http://127.0.0.1:8200
+          VAULT_TOKEN: dev-root-token
+          AWS_ACCESS_KEY_ID: test
+          AWS_SECRET_ACCESS_KEY: test
+          AWS_DEFAULT_REGION: us-east-1
+          AWS_ENDPOINT_URL: http://127.0.0.1:4566
+
+      - name: Run UC1 tests
+        working-directory: tests
+        run: |
+          go test -tags integration -count=1 -v -timeout 10m -run '^TestUC1_' ./integration/... 2>&1 | tee ${{ runner.temp }}/uc1.log
+
+      - name: Generate test report
+        if: always()
+        run: |
+          echo "## UC1: Node Visibility" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Services:** SMD, boot-service, metadata-service" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ -f "${{ runner.temp }}/uc1.log" ]; then
+            if grep -q "PASS" "${{ runner.temp }}/uc1.log"; then
+              echo "✅ **Status:** PASSED" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "❌ **Status:** FAILED" >> $GITHUB_STEP_SUMMARY
+            fi
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Assertions:** Populate SMD with nodes; node visibility chain through boot/metadata, with cloud-init lookup." >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "📄 [Use case documentation](../blob/main/docs/use-cases/uc1-node-visibility.md)" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Capture logs on failure
+        if: failure()
+        run: bash scripts/log-bundle.sh uc1-failure
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uc1-logs-${{ github.run_id }}
+          path: |
+            logs/
+            ${{ runner.temp }}/uc1.log
+          retention-days: 30
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # UC2: Multi-cluster (boot-service, metadata-service)
+  # ──────────────────────────────────────────────────────────────────────────
+  test-uc2:
+    name: "UC2: Multi-cluster"
+    needs: test-uc1
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: tests/go.mod
+          cache: true
+          cache-dependency-path: tests/go.sum
+
+      - name: Set up Docker Buildx
+        if: github.event_name != 'act'
+        uses: docker/setup-buildx-action@v3
+        continue-on-error: true
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: true
+
+      - name: Pull images and start stack
+        run: |
+          bash scripts/build-images.sh
+          docker compose -f compose/infra.yaml -f compose/bmc-sim.yaml -f compose/core.yaml up -d
+          bash fixtures/vault-seed.sh
+          bash fixtures/s3-buckets.sh
+          bash fixtures/seed-smd.sh
+        env:
+          VAULT_ADDR: http://127.0.0.1:8200
+          VAULT_TOKEN: dev-root-token
+          AWS_ACCESS_KEY_ID: test
+          AWS_SECRET_ACCESS_KEY: test
+          AWS_DEFAULT_REGION: us-east-1
+          AWS_ENDPOINT_URL: http://127.0.0.1:4566
+
+      - name: Run UC2 tests
+        working-directory: tests
+        run: |
+          go test -tags integration -count=1 -v -timeout 10m -run '^TestUC2_' ./integration/... 2>&1 | tee ${{ runner.temp }}/uc2.log
+
+      - name: Generate test report
+        if: always()
+        run: |
+          echo "## UC2: Multi-cluster" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Services:** boot-service, metadata-service" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ -f "${{ runner.temp }}/uc2.log" ]; then
+            if grep -q "PASS" "${{ runner.temp }}/uc2.log"; then
+              echo "✅ **Status:** PASSED" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "❌ **Status:** FAILED" >> $GITHUB_STEP_SUMMARY
+            fi
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Assertions:** Two clusters with disjoint node sets; move a node between them; membership reflects on both services." >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "📄 [Use case documentation](../blob/main/docs/use-cases/uc2-multi-cluster.md)" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Capture logs on failure
+        if: failure()
+        run: bash scripts/log-bundle.sh uc2-failure
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uc2-logs-${{ github.run_id }}
+          path: |
+            logs/
+            ${{ runner.temp }}/uc2.log
+          retention-days: 30
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # UC3: Restart resilience (all services)
+  # ──────────────────────────────────────────────────────────────────────────
+  test-uc3:
+    name: "UC3: Restart resilience"
+    needs: test-uc2
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: tests/go.mod
+          cache: true
+          cache-dependency-path: tests/go.sum
+
+      - name: Set up Docker Buildx
+        if: github.event_name != 'act'
+        uses: docker/setup-buildx-action@v3
+        continue-on-error: true
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: true
+
+      - name: Pull images and start stack
+        run: |
+          bash scripts/build-images.sh
+          docker compose -f compose/infra.yaml -f compose/bmc-sim.yaml -f compose/core.yaml up -d
+          bash fixtures/vault-seed.sh
+          bash fixtures/s3-buckets.sh
+          bash fixtures/seed-smd.sh
+        env:
+          VAULT_ADDR: http://127.0.0.1:8200
+          VAULT_TOKEN: dev-root-token
+          AWS_ACCESS_KEY_ID: test
+          AWS_SECRET_ACCESS_KEY: test
+          AWS_DEFAULT_REGION: us-east-1
+          AWS_ENDPOINT_URL: http://127.0.0.1:4566
+
+      - name: Run UC3 tests
+        working-directory: tests
+        run: |
+          go test -tags integration -count=1 -v -timeout 15m -run '^TestUC3_' ./integration/... 2>&1 | tee ${{ runner.temp }}/uc3.log
+
+      - name: Generate test report
+        if: always()
+        run: |
+          echo "## UC3: Restart Resilience" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Services:** All 9 services" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ -f "${{ runner.temp }}/uc3.log" ]; then
+            if grep -q "PASS" "${{ runner.temp }}/uc3.log"; then
+              echo "✅ **Status:** PASSED" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "❌ **Status:** FAILED" >> $GITHUB_STEP_SUMMARY
+            fi
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Assertions:** Restart each container in turn (k8s-style); re-confirm node visibility and cross-service health." >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "📄 [Use case documentation](../blob/main/docs/use-cases/uc3-restart-resilience.md)" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Capture logs on failure
+        if: failure()
+        run: bash scripts/log-bundle.sh uc3-failure
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uc3-logs-${{ github.run_id }}
+          path: |
+            logs/
+            ${{ runner.temp }}/uc3.log
+          retention-days: 30
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # UC4: Tokensmith + SMD (JWT exchange, JWKS verification)
+  # ──────────────────────────────────────────────────────────────────────────
+  test-uc4:
+    name: "UC4: Tokensmith + SMD"
+    needs: test-uc3
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: tests/go.mod
+          cache: true
+          cache-dependency-path: tests/go.sum
+
+      - name: Set up Docker Buildx
+        if: github.event_name != 'act'
+        uses: docker/setup-buildx-action@v3
+        continue-on-error: true
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: true
+
+      - name: Pull images and start stack
+        run: |
+          bash scripts/build-images.sh
+          docker compose -f compose/infra.yaml -f compose/bmc-sim.yaml -f compose/core.yaml up -d
+          bash fixtures/vault-seed.sh
+          bash fixtures/s3-buckets.sh
+          bash fixtures/seed-smd.sh
+        env:
+          VAULT_ADDR: http://127.0.0.1:8200
+          VAULT_TOKEN: dev-root-token
+          AWS_ACCESS_KEY_ID: test
+          AWS_SECRET_ACCESS_KEY: test
+          AWS_DEFAULT_REGION: us-east-1
+          AWS_ENDPOINT_URL: http://127.0.0.1:4566
+
+      - name: Run UC4 tests
+        working-directory: tests
+        run: |
+          go test -tags integration -count=1 -v -timeout 10m -run '^TestUC4_' ./integration/... 2>&1 | tee ${{ runner.temp }}/uc4.log
+
+      - name: Generate test report
+        if: always()
+        run: |
+          echo "## UC4: Tokensmith + SMD" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Services:** tokensmith, SMD" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ -f "${{ runner.temp }}/uc4.log" ]; then
+            if grep -q "PASS" "${{ runner.temp }}/uc4.log"; then
+              echo "✅ **Status:** PASSED" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "❌ **Status:** FAILED" >> $GITHUB_STEP_SUMMARY
+            fi
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Assertions:** RFC 8693 bootstrap-token mint + token exchange; JWKS signature verification; authenticated SMD write round-trips through postgres." >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "📄 [Use case documentation](../blob/main/docs/use-cases/uc4-tokensmith-smd.md)" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Capture logs on failure
+        if: failure()
+        run: bash scripts/log-bundle.sh uc4-failure
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uc4-logs-${{ github.run_id }}
+          path: |
+            logs/
+            ${{ runner.temp }}/uc4.log
+          retention-days: 30
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # UC5: Magellan scan (Redfish discovery)
+  # ──────────────────────────────────────────────────────────────────────────
+  test-uc5:
+    name: "UC5: Magellan scan"
+    needs: test-uc4
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: tests/go.mod
+          cache: true
+          cache-dependency-path: tests/go.sum
+
+      - name: Set up Docker Buildx
+        if: github.event_name != 'act'
+        uses: docker/setup-buildx-action@v3
+        continue-on-error: true
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: true
+
+      - name: Pull images and start stack
+        run: |
+          bash scripts/build-images.sh
+          docker compose -f compose/infra.yaml -f compose/bmc-sim.yaml -f compose/core.yaml up -d
+          bash fixtures/vault-seed.sh
+          bash fixtures/s3-buckets.sh
+          bash fixtures/seed-smd.sh
+        env:
+          VAULT_ADDR: http://127.0.0.1:8200
+          VAULT_TOKEN: dev-root-token
+          AWS_ACCESS_KEY_ID: test
+          AWS_SECRET_ACCESS_KEY: test
+          AWS_DEFAULT_REGION: us-east-1
+          AWS_ENDPOINT_URL: http://127.0.0.1:4566
+
+      - name: Run UC5 tests
+        working-directory: tests
+        run: |
+          go test -tags integration -count=1 -v -timeout 10m -run '^TestUC5_' ./integration/... 2>&1 | tee ${{ runner.temp }}/uc5.log
+
+      - name: Generate test report
+        if: always()
+        run: |
+          echo "## UC5: Magellan Scan" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Services:** magellan, csm-rie, SMD" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ -f "${{ runner.temp }}/uc5.log" ]; then
+            if grep -q "PASS" "${{ runner.temp }}/uc5.log"; then
+              echo "✅ **Status:** PASSED" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "❌ **Status:** FAILED" >> $GITHUB_STEP_SUMMARY
+            fi
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Assertions:** Run the documented \`magellan scan → collect → send\` pipeline against the 8 BMC sims; verify SMD's \`/Inventory/RedfishEndpoints\` reflects the discovered fleet." >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "📄 [Use case documentation](../blob/main/docs/use-cases/uc5-magellan-scan.md)" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Capture logs on failure
+        if: failure()
+        run: bash scripts/log-bundle.sh uc5-failure
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uc5-logs-${{ github.run_id }}
+          path: |
+            logs/
+            ${{ runner.temp }}/uc5.log
+          retention-days: 30
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # UC6: Power control (Redfish power state transitions)
+  # ──────────────────────────────────────────────────────────────────────────
+  test-uc6:
+    name: "UC6: Power control"
+    needs: test-uc5
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: tests/go.mod
+          cache: true
+          cache-dependency-path: tests/go.sum
+
+      - name: Set up Docker Buildx
+        if: github.event_name != 'act'
+        uses: docker/setup-buildx-action@v3
+        continue-on-error: true
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: true
+
+      - name: Pull images and start stack
+        run: |
+          bash scripts/build-images.sh
+          docker compose -f compose/infra.yaml -f compose/bmc-sim.yaml -f compose/core.yaml up -d
+          bash fixtures/vault-seed.sh
+          bash fixtures/s3-buckets.sh
+          bash fixtures/seed-smd.sh
+        env:
+          VAULT_ADDR: http://127.0.0.1:8200
+          VAULT_TOKEN: dev-root-token
+          AWS_ACCESS_KEY_ID: test
+          AWS_SECRET_ACCESS_KEY: test
+          AWS_DEFAULT_REGION: us-east-1
+          AWS_ENDPOINT_URL: http://127.0.0.1:4566
+
+      - name: Run UC6 tests
+        working-directory: tests
+        run: |
+          go test -tags integration -count=1 -v -timeout 10m -run '^TestUC6_' ./integration/... 2>&1 | tee ${{ runner.temp }}/uc6.log
+
+      - name: Generate test report
+        if: always()
+        run: |
+          echo "## UC6: Power Control" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Services:** power-control, SMD, csm-rie" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ -f "${{ runner.temp }}/uc6.log" ]; then
+            if grep -q "PASS" "${{ runner.temp }}/uc6.log"; then
+              echo "✅ **Status:** PASSED" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "❌ **Status:** FAILED" >> $GITHUB_STEP_SUMMARY
+            fi
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Assertions:** POST a \`force-off\`/\`on\` transition; observe \`PowerState\` mutation on the BMC sim via an independent Redfish read; reverse and re-verify." >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "📄 [Use case documentation](../blob/main/docs/use-cases/uc6-power-redfish.md)" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Capture logs on failure
+        if: failure()
+        run: bash scripts/log-bundle.sh uc6-failure
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uc6-logs-${{ github.run_id }}
+          path: |
+            logs/
+            ${{ runner.temp }}/uc6.log
+          retention-days: 30
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # UC7: FRU discovery (device tree reconciliation)
+  # ──────────────────────────────────────────────────────────────────────────
+  test-uc7:
+    name: "UC7: FRU discovery"
+    needs: test-uc6
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: tests/go.mod
+          cache: true
+          cache-dependency-path: tests/go.sum
+
+      - name: Set up Docker Buildx
+        if: github.event_name != 'act'
+        uses: docker/setup-buildx-action@v3
+        continue-on-error: true
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: true
+
+      - name: Pull images and start stack
+        run: |
+          bash scripts/build-images.sh
+          docker compose -f compose/infra.yaml -f compose/bmc-sim.yaml -f compose/core.yaml up -d
+          bash fixtures/vault-seed.sh
+          bash fixtures/s3-buckets.sh
+          bash fixtures/seed-smd.sh
+        env:
+          VAULT_ADDR: http://127.0.0.1:8200
+          VAULT_TOKEN: dev-root-token
+          AWS_ACCESS_KEY_ID: test
+          AWS_SECRET_ACCESS_KEY: test
+          AWS_DEFAULT_REGION: us-east-1
+          AWS_ENDPOINT_URL: http://127.0.0.1:4566
+
+      - name: Run UC7 tests
+        working-directory: tests
+        run: |
+          go test -tags integration -count=1 -v -timeout 10m -run '^TestUC7_' ./integration/... 2>&1 | tee ${{ runner.temp }}/uc7.log
+
+      - name: Generate test report
+        if: always()
+        run: |
+          echo "## UC7: FRU Discovery" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Services:** fru-tracker" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ -f "${{ runner.temp }}/uc7.log" ]; then
+            if grep -q "PASS" "${{ runner.temp }}/uc7.log"; then
+              echo "✅ **Status:** PASSED" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "❌ **Status:** FAILED" >> $GITHUB_STEP_SUMMARY
+            fi
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Assertions:** POST a 32-device discovery snapshot (8 nodes × CPU + 2 DIMMs); poll until reconciler completes; verify parent/child UID linkage in the device tree." >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "📄 [Use case documentation](../blob/main/docs/use-cases/uc7-fru-discovery.md)" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Capture logs on failure
+        if: failure()
+        run: bash scripts/log-bundle.sh uc7-failure
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uc7-logs-${{ github.run_id }}
+          path: |
+            logs/
+            ${{ runner.temp }}/uc7.log
+          retention-days: 30
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Teardown: always run, cleanup containers
+  # ──────────────────────────────────────────────────────────────────────────
+  teardown:
+    name: Teardown
+    needs: [test-uc1, test-uc2, test-uc3, test-uc4, test-uc5, test-uc6, test-uc7]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Stop and remove all containers
+        run: bash scripts/down.sh || true
+
+      - name: Show final Docker state
+        if: always()
+        run: |
+          docker ps -a
+          docker network ls

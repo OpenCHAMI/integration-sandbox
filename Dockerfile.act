@@ -1,0 +1,28 @@
+FROM ghcr.io/catthehacker/ubuntu:full-latest
+
+# Install docker-compose if not present
+RUN apt-get update && \
+    apt-get install -y docker-compose-plugin sudo && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# Create docker group with standard GID and add runner user
+RUN groupadd -g 999 docker 2>/dev/null || true && \
+    usermod -aG docker runner && \
+    usermod -aG sudo runner && \
+    echo "runner ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
+
+# Set up Docker socket directory with proper permissions
+RUN mkdir -p /var/run && \
+    chmod 777 /var/run
+
+# Install corporate CA certificate (uncomment and customize)
+# COPY corp-ca.crt /usr/local/share/ca-certificates/corp-ca.crt
+# RUN update-ca-certificates
+
+# Set environment for SSL
+ENV NODE_TLS_REJECT_UNAUTHORIZED=0
+ENV DOCKER_HOST=unix:///var/run/docker.sock
+
+USER runner
+WORKDIR /home/runner

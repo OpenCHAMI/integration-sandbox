@@ -38,7 +38,10 @@ for img in "${PULL_LIST[@]}"; do
 done
 
 # IPMI sim is built from sibling repo (no public image expected).
-if [ -d "$WORKSPACE/remote-console/ipmi_sim" ]; then
+# Skip if SKIP_SIM is set to true.
+if [[ "${SKIP_SIM:-false}" == "true" ]]; then
+  printf '[build] ⚡ Skipping ipmi_sim (SKIP_SIM=true)\n'
+elif [ -d "$WORKSPACE/remote-console/ipmi_sim" ]; then
   if ! docker image inspect "$SBX_IPMI_SIM_IMAGE" >/dev/null 2>&1; then
     printf '[build] %s\n' "$SBX_IPMI_SIM_IMAGE"
     docker build -q -t "$SBX_IPMI_SIM_IMAGE" "$WORKSPACE/remote-console/ipmi_sim" >/dev/null
@@ -49,7 +52,10 @@ fi
 
 # power-control is not (yet) published. If the pull failed and a sibling repo
 # exists, build from source and tag with whatever name the manifest expects.
-if printf '%s\n' "${MISSING[@]}" | grep -qx "$SBX_POWER_IMAGE"; then
+# Skip if SKIP_SIM is set to true (power-control depends on remote-console).
+if [[ "${SKIP_SIM:-false}" == "true" ]]; then
+  printf '[build] ⚡ Skipping power-control (SKIP_SIM=true)\n'
+elif printf '%s\n' "${MISSING[@]}" | grep -qx "$SBX_POWER_IMAGE"; then
   if [ -d "$WORKSPACE/power-control" ]; then
     printf '[build] %s (from power-control/Dockerfile.build)\n' "$SBX_POWER_IMAGE"
     docker build -q \
