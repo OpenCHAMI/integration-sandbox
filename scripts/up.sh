@@ -22,7 +22,10 @@ if ! docker network inspect openchami-sandbox >/dev/null 2>&1; then
   exit 1
 fi
 
-WAIT_TIMEOUT_S=60 bash scripts/wait-for-stack.sh || true
+# Wait for infra to stabilise before stacking more containers on the
+# runner — gives vault/localstack their CPU window before the 8 sushy-
+# tools containers + 6 core services come up and start contending.
+WAIT_PER_TIMEOUT_S=60 bash scripts/wait-for-stack.sh infra
 
 # Gate the ipmi_sim service (compose/bmc-sim.yaml::ipmi-bmc-0 has
 # `profiles: ["ipmi"]`) on SKIP_SIM. With SKIP_SIM=true the build is
@@ -39,7 +42,7 @@ docker compose -f compose/bmc-sim.yaml up -d
 bash scripts/heartbeat.sh up-starting "compose up: core (profiles=${COMPOSE_PROFILES:-<none>})"
 docker compose -f compose/infra.yaml -f compose/bmc-sim.yaml -f compose/core.yaml up -d
 
-bash scripts/heartbeat.sh up-waiting "polling /health on every service"
-bash scripts/wait-for-stack.sh
+bash scripts/heartbeat.sh up-waiting "polling /health on every service (per-endpoint deadline)"
+bash scripts/wait-for-stack.sh all
 
 bash scripts/heartbeat.sh up "stack is healthy"
