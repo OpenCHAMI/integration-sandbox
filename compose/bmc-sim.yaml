@@ -122,6 +122,12 @@ services:
     image: ${SBX_IPMI_SIM_IMAGE:-openchami/ipmi-sim:dev}
     container_name: sandbox-ipmi-0
     hostname: x0c0s0b0-ipmi
+    # Profile-gated: image is built locally from sibling `remote-console`
+    # checkout and has no public registry. With SKIP_SIM=true (the default
+    # for CI), build-images.sh skips the build; this profile gate then
+    # keeps `docker compose up` from trying to pull a nonexistent image.
+    # scripts/up.sh sets COMPOSE_PROFILES=ipmi when SKIP_SIM=false.
+    profiles: ["ipmi"]
     networks:
       default:
         aliases: [x0c0s0b0-ipmi]

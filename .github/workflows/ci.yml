@@ -4,12 +4,15 @@
 #
 # OpenCHAMI Integration Sandbox CI
 #
-# This workflow replaces the monolithic `make ci` with explicit, traceable jobs
-# for each use case (UC1-UC7). Jobs run sequentially to avoid accidental
-# interference. Each job uploads its own artifacts and reports status.
+# Each per-UC job is self-contained: it brings up the stack via
+# scripts/up.sh, seeds fixtures, runs its tests, captures artifacts, and
+# tears down. GitHub-hosted runners are ephemeral and don't share Docker
+# state across jobs, so the old infra-up / bmc-sim-up / core-up / seed /
+# teardown jobs (b4c74c7) couldn't carry state forward and have been
+# removed. See docs/MAKE_TO_ACTIONS_MAPPING.md.
 #
 # The workflow exposes:
-# - SKIP_SIM: skip building/starting ipmi-sim and remote-console
+# - SKIP_SIM: skip building/starting ipmi-sim and remote-console (default: true)
 # - SBX_*_IMAGE: override any service image (e.g., for PR builds)
 # - IMAGES: manifest selection (release | default | edge | release-v1.0)
 
@@ -45,7 +48,7 @@ on:
         type: string
         default: ""
       sbx_sushy_image:
-        description: "Override csm-rie (Redfish emulator) image"
+        description: "Override sushy-tools (Redfish emulator) image"
         type: string
         default: ""
       sbx_ipmi_sim_image:
@@ -103,7 +106,7 @@ env:
 
 jobs:
   # ──────────────────────────────────────────────────────────────────────────
-  # Setup: checkout, Go, Docker BuildKit, bats
+  # Setup: validate prerequisites, resolve image manifest
   # ──────────────────────────────────────────────────────────────────────────
   setup:
     name: Setup environment
@@ -126,12 +129,10 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y bats
 
       - name: Set up Docker Buildx
-        if: github.event_name != 'act'
         uses: docker/setup-buildx-action@v3
         continue-on-error: true
 
       - name: Log in to GHCR (read-only)
-        if: github.event_name != 'act'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -157,7 +158,6 @@ jobs:
           persist-credentials: false
 
       - name: Set up Docker Buildx
-        if: github.event_name != 'act'
         uses: docker/setup-buildx-action@v3
         continue-on-error: true
 
@@ -173,175 +173,13 @@ jobs:
         run: bash scripts/build-images.sh
 
   # ──────────────────────────────────────────────────────────────────────────
-  # Infrastructure: Vault, LocalStack S3, Postgres
-  # ──────────────────────────────────────────────────────────────────────────
-  infra-up:
-    name: Start infrastructure
-    needs: build-images
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        if: github.event_name != 'act'
-        uses: docker/setup-buildx-action@v3
-        continue-on-error: true
-
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-        continue-on-error: true
-
-      - name: Pull images again (fresh runner)
-        run: bash scripts/build-images.sh
-
-      - name: Start infra stack
-        run: docker compose -f compose/infra.yaml up -d
-
-      - name: Wait for infra health
-        run: bash scripts/wait-for-stack.sh infra
-        timeout-minutes: 5
-
-      - name: Show infra status
-        if: always()
-        run: docker compose -f compose/infra.yaml ps
-
-  # ──────────────────────────────────────────────────────────────────────────
-  # BMC simulators (optional, gated on SKIP_SIM)
-  # ──────────────────────────────────────────────────────────────────────────
-  bmc-sim-up:
-    name: Start BMC simulators
-    needs: infra-up
-    if: ${{ inputs.skip_sim != true && inputs.skip_sim != 'true' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        if: github.event_name != 'act'
-        uses: docker/setup-buildx-action@v3
-        continue-on-error: true
-
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-        continue-on-error: true
-
-      - name: Pull images again
-        run: bash scripts/build-images.sh
-
-      - name: Start BMC sim stack
-        run: docker compose -f compose/infra.yaml -f compose/bmc-sim.yaml up -d
-
-      - name: Show BMC sim status
-        if: always()
-        run: docker compose -f compose/bmc-sim.yaml ps
-
-  # ──────────────────────────────────────────────────────────────────────────
-  # Core services: SMD, tokensmith, boot, metadata, fru, power, magellan
-  # ──────────────────────────────────────────────────────────────────────────
-  core-up:
-    name: Start core services
-    needs: [infra-up, bmc-sim-up]
-    if: always() && needs.infra-up.result == 'success'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        if: github.event_name != 'act'
-        uses: docker/setup-buildx-action@v3
-        continue-on-error: true
-
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-        continue-on-error: true
-
-      - name: Pull images again
-        run: bash scripts/build-images.sh
-
-      - name: Start core stack
-        run: docker compose -f compose/infra.yaml -f compose/bmc-sim.yaml -f compose/core.yaml up -d
-
-      - name: Wait for core services health
-        run: bash scripts/wait-for-stack.sh core
-        timeout-minutes: 5
-
-      - name: Show core status
-        if: always()
-        run: docker compose -f compose/core.yaml ps
-
-  # ──────────────────────────────────────────────────────────────────────────
-  # Seed: Vault, S3 buckets, SMD components
-  # ──────────────────────────────────────────────────────────────────────────
-  seed:
-    name: Seed fixtures
-    needs: core-up
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        if: github.event_name != 'act'
-        uses: docker/setup-buildx-action@v3
-        continue-on-error: true
-
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-        continue-on-error: true
-
-      - name: Pull images and start stack
-        run: |
-          bash scripts/build-images.sh
-          docker compose -f compose/infra.yaml -f compose/bmc-sim.yaml -f compose/core.yaml up -d
-
-      - name: Seed Vault
-        run: bash fixtures/vault-seed.sh
-        env:
-          VAULT_ADDR: http://127.0.0.1:8200
-          VAULT_TOKEN: dev-root-token
-
-      - name: Seed S3 buckets
-        run: bash fixtures/s3-buckets.sh
-        env:
-          AWS_ACCESS_KEY_ID: test
-          AWS_SECRET_ACCESS_KEY: test
-          AWS_DEFAULT_REGION: us-east-1
-          AWS_ENDPOINT_URL: http://127.0.0.1:4566
-
-      - name: Seed SMD
-        run: bash fixtures/seed-smd.sh
-
-  # ──────────────────────────────────────────────────────────────────────────
   # BATS smoke tests (run before integration tests per existing convention)
   # ──────────────────────────────────────────────────────────────────────────
   test-bats:
     name: BATS smoke tests
-    needs: seed
+    needs: build-images
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -350,7 +188,6 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y bats
 
       - name: Set up Docker Buildx
-        if: github.event_name != 'act'
         uses: docker/setup-buildx-action@v3
         continue-on-error: true
 
@@ -362,10 +199,10 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
         continue-on-error: true
 
-      - name: Pull images and start stack
+      - name: Bring up stack + seed
         run: |
           bash scripts/build-images.sh
-          docker compose -f compose/infra.yaml -f compose/bmc-sim.yaml -f compose/core.yaml up -d
+          bash scripts/up.sh
           bash fixtures/vault-seed.sh
           bash fixtures/s3-buckets.sh
           bash fixtures/seed-smd.sh
@@ -380,6 +217,10 @@ jobs:
       - name: Run BATS tests
         run: bats tests/bats/
 
+      - name: Capture logs on failure
+        if: failure()
+        run: bash scripts/log-bundle.sh bats-failure
+
       - name: Upload BATS logs on failure
         if: failure()
         uses: actions/upload-artifact@v4
@@ -388,6 +229,10 @@ jobs:
           path: logs/
           retention-days: 30
 
+      - name: Teardown
+        if: always()
+        run: bash scripts/down.sh || true
+
   # ──────────────────────────────────────────────────────────────────────────
   # UC1: Node visibility (SMD, boot-service, metadata-service)
   # ──────────────────────────────────────────────────────────────────────────
@@ -395,7 +240,7 @@ jobs:
     name: "UC1: Node visibility"
     needs: test-bats
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -408,7 +253,6 @@ jobs:
           cache-dependency-path: tests/go.sum
 
       - name: Set up Docker Buildx
-        if: github.event_name != 'act'
         uses: docker/setup-buildx-action@v3
         continue-on-error: true
 
@@ -420,10 +264,10 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
         continue-on-error: true
 
-      - name: Pull images and start stack
+      - name: Bring up stack + seed
         run: |
           bash scripts/build-images.sh
-          docker compose -f compose/infra.yaml -f compose/bmc-sim.yaml -f compose/core.yaml up -d
+          bash scripts/up.sh
           bash fixtures/vault-seed.sh
           bash fixtures/s3-buckets.sh
           bash fixtures/seed-smd.sh
@@ -472,6 +316,11 @@ jobs:
             logs/
             ${{ runner.temp }}/uc1.log
           retention-days: 30
+          if-no-files-found: ignore
+
+      - name: Teardown
+        if: always()
+        run: bash scripts/down.sh || true
 
   # ──────────────────────────────────────────────────────────────────────────
   # UC2: Multi-cluster (boot-service, metadata-service)
@@ -480,7 +329,7 @@ jobs:
     name: "UC2: Multi-cluster"
     needs: test-uc1
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -493,7 +342,6 @@ jobs:
           cache-dependency-path: tests/go.sum
 
       - name: Set up Docker Buildx
-        if: github.event_name != 'act'
         uses: docker/setup-buildx-action@v3
         continue-on-error: true
 
@@ -505,10 +353,10 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
         continue-on-error: true
 
-      - name: Pull images and start stack
+      - name: Bring up stack + seed
         run: |
           bash scripts/build-images.sh
-          docker compose -f compose/infra.yaml -f compose/bmc-sim.yaml -f compose/core.yaml up -d
+          bash scripts/up.sh
           bash fixtures/vault-seed.sh
           bash fixtures/s3-buckets.sh
           bash fixtures/seed-smd.sh
@@ -557,6 +405,11 @@ jobs:
             logs/
             ${{ runner.temp }}/uc2.log
           retention-days: 30
+          if-no-files-found: ignore
+
+      - name: Teardown
+        if: always()
+        run: bash scripts/down.sh || true
 
   # ──────────────────────────────────────────────────────────────────────────
   # UC3: Restart resilience (all services)
@@ -565,7 +418,7 @@ jobs:
     name: "UC3: Restart resilience"
     needs: test-uc2
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -578,7 +431,6 @@ jobs:
           cache-dependency-path: tests/go.sum
 
       - name: Set up Docker Buildx
-        if: github.event_name != 'act'
         uses: docker/setup-buildx-action@v3
         continue-on-error: true
 
@@ -590,10 +442,10 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
         continue-on-error: true
 
-      - name: Pull images and start stack
+      - name: Bring up stack + seed
         run: |
           bash scripts/build-images.sh
-          docker compose -f compose/infra.yaml -f compose/bmc-sim.yaml -f compose/core.yaml up -d
+          bash scripts/up.sh
           bash fixtures/vault-seed.sh
           bash fixtures/s3-buckets.sh
           bash fixtures/seed-smd.sh
@@ -642,6 +494,11 @@ jobs:
             logs/
             ${{ runner.temp }}/uc3.log
           retention-days: 30
+          if-no-files-found: ignore
+
+      - name: Teardown
+        if: always()
+        run: bash scripts/down.sh || true
 
   # ──────────────────────────────────────────────────────────────────────────
   # UC4: Tokensmith + SMD (JWT exchange, JWKS verification)
@@ -650,7 +507,7 @@ jobs:
     name: "UC4: Tokensmith + SMD"
     needs: test-uc3
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -663,7 +520,6 @@ jobs:
           cache-dependency-path: tests/go.sum
 
       - name: Set up Docker Buildx
-        if: github.event_name != 'act'
         uses: docker/setup-buildx-action@v3
         continue-on-error: true
 
@@ -675,10 +531,10 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
         continue-on-error: true
 
-      - name: Pull images and start stack
+      - name: Bring up stack + seed
         run: |
           bash scripts/build-images.sh
-          docker compose -f compose/infra.yaml -f compose/bmc-sim.yaml -f compose/core.yaml up -d
+          bash scripts/up.sh
           bash fixtures/vault-seed.sh
           bash fixtures/s3-buckets.sh
           bash fixtures/seed-smd.sh
@@ -727,6 +583,11 @@ jobs:
             logs/
             ${{ runner.temp }}/uc4.log
           retention-days: 30
+          if-no-files-found: ignore
+
+      - name: Teardown
+        if: always()
+        run: bash scripts/down.sh || true
 
   # ──────────────────────────────────────────────────────────────────────────
   # UC5: Magellan scan (Redfish discovery)
@@ -735,7 +596,7 @@ jobs:
     name: "UC5: Magellan scan"
     needs: test-uc4
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -748,7 +609,6 @@ jobs:
           cache-dependency-path: tests/go.sum
 
       - name: Set up Docker Buildx
-        if: github.event_name != 'act'
         uses: docker/setup-buildx-action@v3
         continue-on-error: true
 
@@ -760,10 +620,10 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
         continue-on-error: true
 
-      - name: Pull images and start stack
+      - name: Bring up stack + seed
         run: |
           bash scripts/build-images.sh
-          docker compose -f compose/infra.yaml -f compose/bmc-sim.yaml -f compose/core.yaml up -d
+          bash scripts/up.sh
           bash fixtures/vault-seed.sh
           bash fixtures/s3-buckets.sh
           bash fixtures/seed-smd.sh
@@ -785,7 +645,7 @@ jobs:
         run: |
           echo "## UC5: Magellan Scan" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Services:** magellan, csm-rie, SMD" >> $GITHUB_STEP_SUMMARY
+          echo "**Services:** magellan, sushy-tools, SMD" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           if [ -f "${{ runner.temp }}/uc5.log" ]; then
             if grep -q "PASS" "${{ runner.temp }}/uc5.log"; then
@@ -812,6 +672,11 @@ jobs:
             logs/
             ${{ runner.temp }}/uc5.log
           retention-days: 30
+          if-no-files-found: ignore
+
+      - name: Teardown
+        if: always()
+        run: bash scripts/down.sh || true
 
   # ──────────────────────────────────────────────────────────────────────────
   # UC6: Power control (Redfish power state transitions)
@@ -820,7 +685,7 @@ jobs:
     name: "UC6: Power control"
     needs: test-uc5
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -833,7 +698,6 @@ jobs:
           cache-dependency-path: tests/go.sum
 
       - name: Set up Docker Buildx
-        if: github.event_name != 'act'
         uses: docker/setup-buildx-action@v3
         continue-on-error: true
 
@@ -845,10 +709,10 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
         continue-on-error: true
 
-      - name: Pull images and start stack
+      - name: Bring up stack + seed
         run: |
           bash scripts/build-images.sh
-          docker compose -f compose/infra.yaml -f compose/bmc-sim.yaml -f compose/core.yaml up -d
+          bash scripts/up.sh
           bash fixtures/vault-seed.sh
           bash fixtures/s3-buckets.sh
           bash fixtures/seed-smd.sh
@@ -870,7 +734,7 @@ jobs:
         run: |
           echo "## UC6: Power Control" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Services:** power-control, SMD, csm-rie" >> $GITHUB_STEP_SUMMARY
+          echo "**Services:** power-control, SMD, sushy-tools" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           if [ -f "${{ runner.temp }}/uc6.log" ]; then
             if grep -q "PASS" "${{ runner.temp }}/uc6.log"; then
@@ -897,6 +761,11 @@ jobs:
             logs/
             ${{ runner.temp }}/uc6.log
           retention-days: 30
+          if-no-files-found: ignore
+
+      - name: Teardown
+        if: always()
+        run: bash scripts/down.sh || true
 
   # ──────────────────────────────────────────────────────────────────────────
   # UC7: FRU discovery (device tree reconciliation)
@@ -905,7 +774,7 @@ jobs:
     name: "UC7: FRU discovery"
     needs: test-uc6
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -918,7 +787,6 @@ jobs:
           cache-dependency-path: tests/go.sum
 
       - name: Set up Docker Buildx
-        if: github.event_name != 'act'
         uses: docker/setup-buildx-action@v3
         continue-on-error: true
 
@@ -930,10 +798,10 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
         continue-on-error: true
 
-      - name: Pull images and start stack
+      - name: Bring up stack + seed
         run: |
           bash scripts/build-images.sh
-          docker compose -f compose/infra.yaml -f compose/bmc-sim.yaml -f compose/core.yaml up -d
+          bash scripts/up.sh
           bash fixtures/vault-seed.sh
           bash fixtures/s3-buckets.sh
           bash fixtures/seed-smd.sh
@@ -982,25 +850,8 @@ jobs:
             logs/
             ${{ runner.temp }}/uc7.log
           retention-days: 30
+          if-no-files-found: ignore
 
-  # ──────────────────────────────────────────────────────────────────────────
-  # Teardown: always run, cleanup containers
-  # ──────────────────────────────────────────────────────────────────────────
-  teardown:
-    name: Teardown
-    needs: [test-uc1, test-uc2, test-uc3, test-uc4, test-uc5, test-uc6, test-uc7]
-    if: always()
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Stop and remove all containers
-        run: bash scripts/down.sh || true
-
-      - name: Show final Docker state
+      - name: Teardown
         if: always()
-        run: |
-          docker ps -a
-          docker network ls
+        run: bash scripts/down.sh || true

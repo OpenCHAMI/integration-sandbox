@@ -25,3 +25,6 @@ coverage.txt
 # Backup module files.
 tests/go.mod.bak
 tests/go.sum.bak
+
+# Local act secrets — never commit; .secrets.example is the template.
+.secrets

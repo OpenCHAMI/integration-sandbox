@@ -128,18 +128,26 @@ Each use case runs as a **separate, traceable job** with:
 
 **Local testing with act:**
 ```bash
-# Install act (GitHub Actions simulator)
-brew install act  # or see https://github.com/nektos/act
+# 1) Install act once (https://github.com/nektos/act)
+brew install act           # macOS
+# or: curl -fsSL https://raw.githubusercontent.com/nektos/act/master/install.sh | sudo bash
 
-# List all jobs without running
-act --list
+# 2) Build the runner image once (provides docker-compose, sudo, runner user)
+docker build -t integration-sandbox-act:latest -f Dockerfile.act .
 
-# Run a single use case locally
-act -j test-uc1
+# 3) Create your local secrets file (gitignored)
+cp .secrets.example .secrets    # placeholder GITHUB_TOKEN is fine for public images
 
-# Run the full workflow
-act
+# 4) Run
+act --list                                # show all jobs without running
+act -j test-uc1 --secret-file .secrets    # run one UC job in isolation first
+act push --secret-file .secrets           # full CI on push event
+act pull_request --secret-file .secrets   # PR-style trigger
 ```
+
+`.actrc` in the repo root binds `ubuntu-latest` to the runner image and
+shares the host Docker socket so the workflow's `docker compose` calls
+land on the same daemon (no DinD).
 
 See [`docs/MAKE_TO_ACTIONS_MAPPING.md`](docs/MAKE_TO_ACTIONS_MAPPING.md) for the complete mapping from `make ci` to the new workflow.
 
