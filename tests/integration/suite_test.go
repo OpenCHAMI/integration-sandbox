@@ -55,29 +55,6 @@ var httpClient = &http.Client{
 	},
 }
 
-// waitFor200 polls url until it returns 200/204/401 or deadline elapses.
-func waitFor200(t *testing.T, url string, timeout time.Duration) {
-	t.Helper()
-	deadline := time.Now().Add(timeout)
-	var lastCode int
-	var lastErr error
-	for time.Now().Before(deadline) {
-		req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, url, nil)
-		resp, err := httpClient.Do(req)
-		if err == nil {
-			lastCode = resp.StatusCode
-			resp.Body.Close()
-			if resp.StatusCode == 200 || resp.StatusCode == 204 || resp.StatusCode == 401 {
-				return
-			}
-		} else {
-			lastErr = err
-		}
-		time.Sleep(2 * time.Second)
-	}
-	t.Fatalf("timeout waiting for %s (last code=%d, err=%v)", url, lastCode, lastErr)
-}
-
 // TestMain runs once before any test in the package; ensures every endpoint is reachable.
 func TestMain(m *testing.M) {
 	// quick liveness sweep — keep diagnostic so a CI failure here is informative.
