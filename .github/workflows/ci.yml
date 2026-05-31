@@ -23,18 +23,23 @@
 name: ci
 
 on:
+  # Auto-trigger only when an image manifest changes. The harness itself
+  # (scripts, fixtures, compose, tests) doesn't get re-run on every push
+  # because the test surface is the image set — code changes can be
+  # validated with workflow_dispatch when needed.
   push:
     branches: [main]
+    paths:
+      - "images/**.env"
   pull_request:
-  schedule:
-    # Daily 06:00 UTC - drift detection against floating tags
-    - cron: "0 6 * * *"
+    paths:
+      - "images/**.env"
   workflow_dispatch:
     inputs:
       images:
-        description: "Manifest under images/ (release | default | edge | release-v1.0)"
+        description: "Manifest under images/ (default | release | edge | release-v1.0)"
         type: string
-        default: "release"
+        default: "default"
       skip_sim:
         description: "Skip building and starting ipmi-sim / remote-console"
         type: boolean
@@ -93,7 +98,7 @@ permissions:
   packages: read
 
 env:
-  IMAGES: ${{ inputs.images || 'release' }}
+  IMAGES: ${{ inputs.images || 'default' }}
   SKIP_SIM: ${{ inputs.skip_sim || 'true' }}
   SBX_VAULT_IMAGE: ${{ inputs.sbx_vault_image }}
   SBX_LOCALSTACK_IMAGE: ${{ inputs.sbx_localstack_image }}

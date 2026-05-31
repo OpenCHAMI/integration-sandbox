@@ -1,10 +1,11 @@
 .DEFAULT_GOAL := help
 
 ROOT := $(shell pwd)
-# Default to the `release` manifest — each OpenCHAMI service is pinned to its
-# latest GitHub Release tag (regenerate with `make refresh-releases`). Use
-# IMAGES=default for the floating :latest tags, IMAGES=edge for :main builds.
-IMAGES ?= release
+# Default to the `default` manifest — the verified known-good PR-tag mix
+# (see images/default.env header for the date it was last validated).
+# IMAGES=release pins to the latest GitHub Release tags (regenerate with
+# `make refresh-releases`); IMAGES=edge tracks :main for drift detection.
+IMAGES ?= default
 COMPOSE := docker compose -f compose/infra.yaml -f compose/bmc-sim.yaml -f compose/core.yaml
 
 # Export so scripts/load-images.sh sees it.
@@ -15,9 +16,9 @@ export IMAGES
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-20s %s\n", $$1, $$2}'
 	@echo ""
-	@echo "Image selection (default: release — latest GitHub Release tag of each service):"
-	@echo "  make ci                                                  # images/release.env (default)"
-	@echo "  make ci IMAGES=default                                   # images/default.env (floating :latest)"
+	@echo "Image selection (default: default — verified known-good PR-tag mix):"
+	@echo "  make ci                                                  # images/default.env (default)"
+	@echo "  make ci IMAGES=release                                   # images/release.env (latest GH Releases)"
 	@echo "  make ci IMAGES=edge                                      # images/edge.env (:main builds)"
 	@echo "  make ci IMAGES=release-v1.0                              # images/release-v1.0.env (pinned snapshot)"
 	@echo "  make ci SBX_TOKENSMITH_IMAGE=ghcr.io/openchami/tokensmith:pr-23"
