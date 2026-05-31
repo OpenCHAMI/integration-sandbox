@@ -44,6 +44,13 @@ precedence = "aggregate"
 SPDX-FileCopyrightText = "Copyright © 2026 OpenCHAMI a Series of LF Projects, LLC"
 SPDX-License-Identifier = "MIT"
 
+# JSON config files (no comment syntax → must be covered here, not via header).
+[[annotations]]
+path = [".github/renovate.json"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "Copyright © 2026 OpenCHAMI a Series of LF Projects, LLC"
+SPDX-License-Identifier = "MIT"
+
 # Markdown documentation.
 [[annotations]]
 path = "**.md"

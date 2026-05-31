@@ -1,0 +1,23 @@
+# Copyright © 2026 OpenCHAMI a Series of LF Projects, LLC
+#
+# SPDX-License-Identifier: MIT
+#
+# golangci-lint config for the integration test suite.
+# Format: golangci-lint v2.
+
+version: "2"
+
+run:
+  build-tags:
+    - integration
+
+linters:
+  default: standard
+  settings:
+    errcheck:
+      # In tests, deferred Body.Close() return values are conventionally
+      # ignored — the response is already consumed by the assertion above
+      # the defer, and a Close error in test cleanup is not actionable.
+      # io.Closer covers http.Response.Body (an io.ReadCloser).
+      exclude-functions:
+        - (io.Closer).Close
