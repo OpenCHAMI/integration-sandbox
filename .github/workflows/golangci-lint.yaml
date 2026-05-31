@@ -19,19 +19,17 @@ jobs:
       run:
         working-directory: tests
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           persist-credentials: false
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: tests/go.mod
       - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v6
+        uses: golangci/golangci-lint-action@v9
         with:
-          # Pinned to v2; `latest` resolves to the newest v1 in this action
-          # (1.64.x as of 2026-05), which can't read tests/.golangci.yml.
-          # When bumping, keep this in sync with the `version: "2"` declared
-          # in tests/.golangci.yml.
-          version: v2.12.1
+          # `version` is the golangci-lint *binary* version, not the action.
+          # Pinned so it stays in sync with the v2 schema in tests/.golangci.yml.
+          version: v2.12.2
           working-directory: tests
           args: --build-tags=integration
