@@ -3,7 +3,8 @@
 # SPDX-License-Identifier: MIT
 #
 # golangci-lint config for the integration test suite.
-# Format: golangci-lint v2.
+# Format: golangci-lint v2 (matches the binary pinned in
+# .github/workflows/golangci-lint.yaml — keep the two in sync).
 
 version: "2"
 
