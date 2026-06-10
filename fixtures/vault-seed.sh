@@ -8,10 +8,18 @@ set -euo pipefail
 VAULT_ADDR="${VAULT_ADDR:-http://127.0.0.1:8200}"
 VAULT_TOKEN="${VAULT_TOKEN:-dev-root-token}"
 CLUSTER="${CLUSTER:-sandbox}"
+CONTAINER="${VAULT_CONTAINER:-sandbox-vault}"
 
 export VAULT_ADDR VAULT_TOKEN
 
 XNAMES=(x0c0s0b0 x0c0s1b0 x0c0s2b0 x0c0s3b0 x0c0s4b0 x0c0s5b0 x0c0s6b0 x0c0s7b0)
+
+vault() {
+  docker exec -i \
+    -e VAULT_ADDR="$VAULT_ADDR" \
+    -e VAULT_TOKEN="$VAULT_TOKEN" \
+    "$CONTAINER" vault "$@"
+}
 
 # --- KV-v2 namespace for cluster-wide secrets (mirrors openchami-operator) ---
 vault secrets enable -path=openchami kv-v2 2>/dev/null || true

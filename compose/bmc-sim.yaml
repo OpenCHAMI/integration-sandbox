@@ -41,7 +41,7 @@ x-redfish-bmc: &redfish-bmc
       mkdir -p /tmp/tls
       openssl req -x509 -newkey rsa:2048 -nodes \
         -keyout /tmp/tls/key.pem -out /tmp/tls/cert.pem \
-        -days 365 -subj "/CN=${HOSTNAME}" 2>/dev/null
+        -days 365 -subj "/CN=$${HOSTNAME}" 2>/dev/null
       exec sushy-emulator --fake -i :: -p 443 \
         --ssl-certificate /tmp/tls/cert.pem \
         --ssl-key /tmp/tls/key.pem

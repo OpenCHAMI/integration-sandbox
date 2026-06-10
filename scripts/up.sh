@@ -28,11 +28,18 @@ fi
 WAIT_PER_TIMEOUT_S=60 bash scripts/wait-for-stack.sh infra
 
 # Gate the ipmi_sim service (compose/bmc-sim.yaml::ipmi-bmc-0 has
-# `profiles: ["ipmi"]`) on SKIP_SIM. With SKIP_SIM=true the build is
-# skipped and the image won't pull; the profile keeps compose from trying.
+# `profiles: ["ipmi"]`) on SKIP_SIM and image availability. If the image
+# is missing and cannot be pulled, skip ipmi instead of hard-failing `up`.
 if [[ -z "${COMPOSE_PROFILES:-}" ]]; then
   if [[ "${SKIP_SIM:-false}" != "true" ]]; then
-    export COMPOSE_PROFILES="ipmi"
+    if docker image inspect "$SBX_IPMI_SIM_IMAGE" >/dev/null 2>&1; then
+      export COMPOSE_PROFILES="ipmi"
+    elif timeout 30 docker pull --quiet "$SBX_IPMI_SIM_IMAGE" >/dev/null 2>&1; then
+      export COMPOSE_PROFILES="ipmi"
+    else
+      bash scripts/heartbeat.sh up-warning "ipmi image unavailable; continuing with SKIP_SIM=true"
+      echo "up: WARN: IPMI image unavailable ($SBX_IPMI_SIM_IMAGE); continuing without ipmi profile" >&2
+    fi
   fi
 fi
 
