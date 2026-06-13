@@ -7,12 +7,20 @@ setup() {
   : "${SBX_VAULT_URL:=http://127.0.0.1:8200}"
   : "${SBX_SMD_URL:=http://127.0.0.1:27779}"
   : "${SBX_LOCALSTACK_URL:=http://127.0.0.1:4566}"
+  : "${VAULT_CONTAINER:=sandbox-vault}"
   export VAULT_ADDR="$SBX_VAULT_URL"
   export VAULT_TOKEN="${VAULT_TOKEN:-dev-root-token}"
   export AWS_ACCESS_KEY_ID=test
   export AWS_SECRET_ACCESS_KEY=test
   export AWS_DEFAULT_REGION=us-east-1
   export AWS_ENDPOINT_URL="$SBX_LOCALSTACK_URL"
+}
+
+vault() {
+  docker exec -i \
+    -e VAULT_ADDR="$VAULT_ADDR" \
+    -e VAULT_TOKEN="$VAULT_TOKEN" \
+    "$VAULT_CONTAINER" vault "$@"
 }
 
 @test "vault status reports unsealed" {
