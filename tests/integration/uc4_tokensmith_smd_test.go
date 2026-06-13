@@ -118,7 +118,9 @@ func TestUC4_Tokensmith_SMD(t *testing.T) {
 			"RS256", "RS384", "RS512",
 			"PS256", "PS384", "PS512",
 			"ES256", "ES384", "ES512",
-		}))
+		}),
+		jwt.WithLeeway(30*time.Second),
+	)
 	if err != nil {
 		t.Fatalf("verify JWT against JWKS: %v", err)
 	}

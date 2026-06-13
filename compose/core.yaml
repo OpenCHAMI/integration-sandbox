@@ -118,7 +118,7 @@ services:
     command:
       - "serve"
       - "--port=27793"
-      - "--database-url=file:/data/fru.db?cache=shared&_fk=1"
+      - "--database-url=file:/data/fru.db?cache=shared&_fk=1&_busy_timeout=5000&_journal_mode=WAL"
     tmpfs:
       - /data:mode=1777
     ports:
@@ -127,6 +127,7 @@ services:
 
   power-control:
     image: ${SBX_POWER_IMAGE:-ghcr.io/openchami/pcs:pr-68}
+    platform: linux/amd64
     container_name: sandbox-power
     # power-control's Vault credstore (HMS hms-securestorage) only authenticates
     # to Vault via the K8s service-account JWT flow — VAULT_TOKEN is ignored.
