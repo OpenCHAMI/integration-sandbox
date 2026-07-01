@@ -27,24 +27,12 @@
   "customManagers": [
     {
       "customType": "regex",
-      "description": "Bump OpenCHAMI service image tags in images/*.env",
+      "description": "Bump explicitly-annotated image tags in images/*.env (both OpenCHAMI services and third-party images). packageRules below scope behaviour per registry.",
       "fileMatch": [
         "^images/.+\\.env$"
       ],
       "matchStrings": [
-        "# renovate:\\s*datasource=docker(?:\\s+versioning=(?<versioning>[a-z]+))?\\s*\\nSBX_[A-Z_]+_IMAGE=(?<depName>ghcr\\.io/openchami/[^:\\s]+):(?<currentValue>[^\\s]+)"
-      ],
-      "datasourceTemplate": "docker",
-      "versioningTemplate": "{{#if versioning}}{{{versioning}}}{{else}}loose{{/if}}"
-    },
-    {
-      "customType": "regex",
-      "description": "Bump any other explicitly-annotated image tags in images/*.env",
-      "fileMatch": [
-        "^images/.+\\.env$"
-      ],
-      "matchStrings": [
-        "# renovate:\\s*datasource=docker(?:\\s+versioning=(?<versioning>[a-z]+))?\\s*\\nSBX_[A-Z_]+_IMAGE=(?<depName>(?!ghcr\\.io/openchami/)[^:\\s]+):(?<currentValue>[^\\s]+)"
+        "# renovate:\\s*datasource=docker(?:\\s+versioning=(?<versioning>[a-z]+))?\\s*\\nSBX_[A-Z_]+_IMAGE=(?<depName>[^:\\s]+):(?<currentValue>[^\\s]+)"
       ],
       "datasourceTemplate": "docker",
       "versioningTemplate": "{{#if versioning}}{{{versioning}}}{{else}}loose{{/if}}"
@@ -54,15 +42,14 @@
   "packageRules": [
     {
       "description": "Group all OpenCHAMI service bumps into one PR per release wave so the sandbox tests them together — the way they actually deploy.",
-      "matchPackagePrefixes": ["ghcr.io/openchami/"],
+      "matchPackageNames": ["ghcr.io/openchami/**"],
       "groupName": "openchami services",
       "schedule": ["after 9pm every weekday", "before 6am every weekday", "every weekend"]
     },
     {
       "description": "Don't chase pre-release tags (pr-*, rc.*, alpha, beta). Renovate's default would otherwise open noisy PRs for every PR build pushed to ghcr.",
-      "matchPackagePatterns": ["^ghcr\\.io/openchami/"],
-      "ignoreUnstable": true,
-      "matchUpdateTypes": ["major", "minor", "patch"]
+      "matchPackageNames": ["ghcr.io/openchami/**"],
+      "ignoreUnstable": true
     },
     {
       "description": "Auto-merge sandbox-fixture and tooling-only PRs that pass CI. Service bumps stay manual — they're the whole point of the sandbox: a human should look at the PR diff.",
