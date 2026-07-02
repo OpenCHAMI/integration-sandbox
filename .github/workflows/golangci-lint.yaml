@@ -19,14 +19,14 @@ jobs:
       run:
         working-directory: tests
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.0
         with:
           persist-credentials: false
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v6.5.0
         with:
           go-version-file: tests/go.mod
       - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v9
+        uses: golangci/golangci-lint-action@v9.3.0
         with:
           # `version` is the golangci-lint *binary* version, not the action.
           # Pinned so it stays in sync with the v2 schema in tests/.golangci.yml.
