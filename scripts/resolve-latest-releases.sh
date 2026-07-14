@@ -31,6 +31,7 @@ declare -a SERVICES=(
   "SBX_FRU_IMAGE|ghcr.io/openchami/fru-tracker|OpenCHAMI/fru-tracker"
   "SBX_POWER_IMAGE|ghcr.io/openchami/power-control|OpenCHAMI/power-control"
   "SBX_MAGELLAN_IMAGE|ghcr.io/openchami/magellan|OpenCHAMI/magellan"
+  "SBX_OCHAMI_IMAGE|ghcr.io/openchami/ochami|OpenCHAMI/ochami"
 )
 
 # Third-party + sandbox-only images we don't track via GitHub Releases.

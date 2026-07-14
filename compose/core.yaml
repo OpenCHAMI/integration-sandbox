@@ -166,3 +166,12 @@ services:
       MASTER_KEY: "00000000000000000000000000000000"
     entrypoint: ["/magellan"]
     command: ["--help"]
+
+  # one-shot helper container that runs `ochami` against the services.
+  ochami-runner:
+    image: ${SBX_OCHAMI_IMAGE:-ghcr.io/openchami/ochami:latest}
+    container_name: sandbox-ochami-runner
+    network_mode: host
+    profiles: ["tools"]
+    entrypoint: ["ochami"]
+    command: ["--help"]
