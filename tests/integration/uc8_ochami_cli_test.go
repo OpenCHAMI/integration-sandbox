@@ -10,6 +10,7 @@ package integration
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -38,6 +39,7 @@ type ochami_test struct {
 	expected_stdout   string
 	log_stdout        bool
 	skip_stdout_check bool
+	output_transform  func(string) (string, error)
 }
 
 var ochami_tests = []ochami_test{
@@ -61,6 +63,43 @@ var ochami_tests = []ochami_test{
 		name:            "smd group get testing",
 		args:            []string{"smd", "group", "get", "--name", "testing"},
 		expected_stdout: `[{"description":"","label":"testing","members":{"ids":["x0c0s0b0"]}}]`,
+	},
+	ochami_test{
+		name:            "ochami boot config add",
+		args:            []string{"boot", "config", "add", "-d", "@-", "-f", "json"},
+		expected_stdout: "",
+		stdin: `{"spec":
+			{
+				"kernel": "http://fake-address/vmlinuz",
+				"initrd": "http://fake-address/initramfs.img",
+				"params": "nomodeset ro root=live:http://fake-address/fake-image",
+				"macs": ["02:00:00:00:00:00"]
+			}}`,
+	},
+	ochami_test{
+		name:            "ochami boot config list",
+		args:            []string{"boot", "config", "list"},
+		expected_stdout: `[{"apiVersion":"v1","kind":"BootConfiguration","metadata":null,"spec":{"initrd":"http://fake-address/initramfs.img","kernel":"http://fake-address/vmlinuz","macs":["02:00:00:00:00:00"],"params":"nomodeset ro root=live:http://fake-address/fake-image"},"status":{}}]`,
+		// Gotta remove date metadata from the output
+		output_transform: func(in string) (out string, err error) {
+			var temp []map[string]any
+			err = json.Unmarshal([]byte(in), &temp)
+			if err != nil {
+				return
+			}
+
+			for _, o := range temp {
+				for k, _ := range o {
+					if k == "metadata" {
+						o[k] = nil
+					}
+				}
+			}
+
+			out_byte, err := json.Marshal(temp)
+			out = string(out_byte)
+			return
+		},
 	},
 }
 
@@ -249,6 +288,15 @@ func TestUC8_Ochami_CLI(t *testing.T) {
 
 			if test.log_stdout == true {
 				t.Log(stdout)
+			}
+
+			if test.output_transform != nil {
+				stdout, err = test.output_transform(stdout)
+				if err != nil {
+					t.Errorf("Unable to transform output: %v", err)
+					die = true
+					return
+				}
 			}
 
 			if !test.skip_stdout_check {
