@@ -101,6 +101,29 @@ var ochami_tests = []ochami_test{
 			return
 		},
 	},
+	ochami_test{
+		name:            "ochami pcs status show x0c0s0b0",
+		args:            []string{"pcs", "status", "show", "x0c0s0b0"},
+		expected_stdout: `{"error":"","lastUpdated":null,"managementState":"available","powerState":"on","supportedPowerTransitions":[],"xname":"x0c0s0b0"}`,
+		// Remove lastUpdated timestamp
+		output_transform: func(in string) (out string, err error) {
+			var temp map[string]any
+			err = json.Unmarshal([]byte(in), &temp)
+			if err != nil {
+				return
+			}
+
+			for k, _ := range temp {
+				if k == "lastUpdated" {
+					temp[k] = nil
+				}
+			}
+
+			out_byte, err := json.Marshal(temp)
+			out = string(out_byte)
+			return
+		},
+	},
 }
 
 const config_template = `
@@ -119,7 +142,7 @@ clusters:
         cloud-init:
           uri: {{ .metadata }}
         pcs:
-          uri: {{ .pcs }}
+          uri: {{ .power }}
         boot-service:
           api-version: v1
           uri: {{ .boot }}
