@@ -31,101 +31,6 @@ import (
 // Stub-resistance: Uses some dynamic data to help prevent stub responses and
 // requests
 
-type ochami_test struct {
-	name  string
-	stdin string
-	args  []string
-
-	expected_stdout   string
-	log_stdout        bool
-	skip_stdout_check bool
-	output_transform  func(string) (string, error)
-}
-
-var ochami_tests = []ochami_test{
-	ochami_test{
-		name:              "version",
-		args:              []string{"version"},
-		log_stdout:        true,
-		skip_stdout_check: true,
-	},
-	ochami_test{
-		name:            "smd group add",
-		args:            []string{"smd", "group", "add", "testing"},
-		expected_stdout: "",
-	},
-	ochami_test{
-		name:            "smd group add member x0c0s0b0",
-		args:            []string{"smd", "group", "member", "add", "testing", "x0c0s0b0"},
-		expected_stdout: "",
-	},
-	ochami_test{
-		name:            "smd group get testing",
-		args:            []string{"smd", "group", "get", "--name", "testing"},
-		expected_stdout: `[{"description":"","label":"testing","members":{"ids":["x0c0s0b0"]}}]`,
-	},
-	ochami_test{
-		name:            "ochami boot config add",
-		args:            []string{"boot", "config", "add", "-d", "@-", "-f", "json"},
-		expected_stdout: "",
-		stdin: `{"spec":
-			{
-				"kernel": "http://fake-address/vmlinuz",
-				"initrd": "http://fake-address/initramfs.img",
-				"params": "nomodeset ro root=live:http://fake-address/fake-image",
-				"macs": ["02:00:00:00:00:00"]
-			}}`,
-	},
-	ochami_test{
-		name:            "ochami boot config list",
-		args:            []string{"boot", "config", "list"},
-		expected_stdout: `[{"apiVersion":"v1","kind":"BootConfiguration","metadata":null,"spec":{"initrd":"http://fake-address/initramfs.img","kernel":"http://fake-address/vmlinuz","macs":["02:00:00:00:00:00"],"params":"nomodeset ro root=live:http://fake-address/fake-image"},"status":{}}]`,
-		// Gotta remove date metadata from the output
-		output_transform: func(in string) (out string, err error) {
-			var temp []map[string]any
-			err = json.Unmarshal([]byte(in), &temp)
-			if err != nil {
-				return
-			}
-
-			for _, o := range temp {
-				for k, _ := range o {
-					if k == "metadata" {
-						o[k] = nil
-					}
-				}
-			}
-
-			out_byte, err := json.Marshal(temp)
-			out = string(out_byte)
-			return
-		},
-	},
-	ochami_test{
-		name:            "ochami pcs status show x0c0s0b0",
-		args:            []string{"pcs", "status", "show", "x0c0s0b0"},
-		expected_stdout: `{"error":"","lastUpdated":null,"managementState":"available","powerState":"on","supportedPowerTransitions":[],"xname":"x0c0s0b0"}`,
-		// Remove lastUpdated timestamp
-		output_transform: func(in string) (out string, err error) {
-			var temp map[string]any
-			err = json.Unmarshal([]byte(in), &temp)
-			if err != nil {
-				return
-			}
-
-			for k, _ := range temp {
-				if k == "lastUpdated" {
-					temp[k] = nil
-				}
-			}
-
-			out_byte, err := json.Marshal(temp)
-			out = string(out_byte)
-			return
-		},
-	},
-}
-
 const config_template = `
 default-cluster: test
 log:
@@ -256,6 +161,98 @@ func (r *ochami_runner) gen_access_token() error {
 }
 
 func TestUC8_Ochami_CLI(t *testing.T) {
+	var ochami_tests = []struct {
+		name  string
+		stdin string
+		args  []string
+
+		expected_stdout   string
+		log_stdout        bool
+		skip_stdout_check bool
+		output_transform  func(string) (string, error)
+	}{
+		{
+			name:              "version",
+			args:              []string{"version"},
+			log_stdout:        true,
+			skip_stdout_check: true,
+		},
+		{
+			name:            "smd group add",
+			args:            []string{"smd", "group", "add", "testing"},
+			expected_stdout: "",
+		},
+		{
+			name:            "smd group add member x0c0s0b0",
+			args:            []string{"smd", "group", "member", "add", "testing", "x0c0s0b0"},
+			expected_stdout: "",
+		},
+		{
+			name:            "smd group get testing",
+			args:            []string{"smd", "group", "get", "--name", "testing"},
+			expected_stdout: `[{"description":"","label":"testing","members":{"ids":["x0c0s0b0"]}}]`,
+		},
+		{
+			name:            "ochami boot config add",
+			args:            []string{"boot", "config", "add", "-d", "@-", "-f", "json"},
+			expected_stdout: "",
+			stdin: `{"spec":
+			{
+				"kernel": "http://fake-address/vmlinuz",
+				"initrd": "http://fake-address/initramfs.img",
+				"params": "nomodeset ro root=live:http://fake-address/fake-image",
+				"macs": ["02:00:00:00:00:00"]
+			}}`,
+		},
+		{
+			name:            "ochami boot config list",
+			args:            []string{"boot", "config", "list"},
+			expected_stdout: `[{"apiVersion":"v1","kind":"BootConfiguration","metadata":null,"spec":{"initrd":"http://fake-address/initramfs.img","kernel":"http://fake-address/vmlinuz","macs":["02:00:00:00:00:00"],"params":"nomodeset ro root=live:http://fake-address/fake-image"},"status":{}}]`,
+			// Gotta remove date metadata from the output
+			output_transform: func(in string) (out string, err error) {
+				var temp []map[string]any
+				err = json.Unmarshal([]byte(in), &temp)
+				if err != nil {
+					return
+				}
+
+				for _, o := range temp {
+					for k, _ := range o {
+						if k == "metadata" {
+							o[k] = nil
+						}
+					}
+				}
+
+				out_byte, err := json.Marshal(temp)
+				out = string(out_byte)
+				return
+			},
+		},
+		{
+			name:            "ochami pcs status show x0c0s0b0",
+			args:            []string{"pcs", "status", "show", "x0c0s0b0"},
+			expected_stdout: `{"error":"","lastUpdated":null,"managementState":"available","powerState":"on","supportedPowerTransitions":[],"xname":"x0c0s0b0"}`,
+			// Remove lastUpdated timestamp
+			output_transform: func(in string) (out string, err error) {
+				var temp map[string]any
+				err = json.Unmarshal([]byte(in), &temp)
+				if err != nil {
+					return
+				}
+
+				for k, _ := range temp {
+					if k == "lastUpdated" {
+						temp[k] = nil
+					}
+				}
+
+				out_byte, err := json.Marshal(temp)
+				out = string(out_byte)
+				return
+			},
+		},
+	}
 	ctx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
 	defer cancel()
 
