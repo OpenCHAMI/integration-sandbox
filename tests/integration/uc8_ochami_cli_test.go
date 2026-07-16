@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
+	"github.com/stretchr/testify/assert"
 )
 
 // TestUC8_Ochami_CLI tests the Ochami CLI against various endpoints:
@@ -178,6 +179,7 @@ func TestUC8_Ochami_CLI(t *testing.T) {
 		expected_stdout   string
 		log_stdout        bool
 		skip_stdout_check bool
+		compare_json      bool
 		output_transform  func(string) (string, error)
 	}{
 		{
@@ -200,11 +202,13 @@ func TestUC8_Ochami_CLI(t *testing.T) {
 			name:            "smd group get testing",
 			args:            []string{"smd", "group", "get", "--name", "testing"},
 			expected_stdout: `[{"description":"","label":"testing","members":{"ids":["x0c0s0b0"]}}]`,
+			compare_json:    true,
 		},
 		{
 			name:            "smd group membership testing",
 			args:            []string{"smd", "group", "get", "--name", "testing"},
 			expected_stdout: `[{"description":"","label":"testing","members":{"ids":["x0c0s0b0"]}}]`,
+			compare_json:    true,
 		},
 		{
 			name:            "ochami boot config add",
@@ -222,6 +226,7 @@ func TestUC8_Ochami_CLI(t *testing.T) {
 			name:            "ochami boot config list",
 			args:            []string{"boot", "config", "list"},
 			expected_stdout: `[{"apiVersion":"v1","kind":"BootConfiguration","metadata":null,"spec":{"initrd":"http://fake-address/initramfs.img","kernel":"http://fake-address/vmlinuz","macs":["02:00:00:00:00:00"],"params":"nomodeset ro root=live:http://fake-address/fake-image"},"status":{}}]`,
+			compare_json:    true,
 			// Gotta remove date metadata from the output
 			output_transform: func(in string) (out string, err error) {
 				var temp []map[string]any
@@ -247,6 +252,7 @@ func TestUC8_Ochami_CLI(t *testing.T) {
 			name:            "ochami pcs status show x0c0s0b0",
 			args:            []string{"pcs", "status", "show", "x0c0s0b0"},
 			expected_stdout: `{"error":"","lastUpdated":null,"managementState":"available","powerState":"on","supportedPowerTransitions":[],"xname":"x0c0s0b0"}`,
+			compare_json:    true,
 			// Remove lastUpdated timestamp
 			output_transform: func(in string) (out string, err error) {
 				var temp map[string]any
@@ -334,11 +340,26 @@ func TestUC8_Ochami_CLI(t *testing.T) {
 			}
 
 			if !test.skip_stdout_check {
-				// TODO: Should this compare the normalized JSON instead of the bytes?
-				if strings.TrimSpace(stdout) != strings.TrimSpace(test.expected_stdout) {
-					t.Errorf("Bad output, expected '%s' and got '%s'\n%s", test.expected_stdout, stdout, stderr)
-					die = true
-					return
+				if test.compare_json {
+					if !assert.JSONEqf(t,
+						test.expected_stdout,
+						stdout,
+						"Bad output, expected '%s' and got '%s'\n%s",
+						test.expected_stdout, stdout, stderr,
+					) {
+						die = true
+						return
+					}
+				} else {
+					if !assert.Equalf(t,
+						strings.TrimSpace(test.expected_stdout),
+						strings.TrimSpace(stdout),
+						"Bad output, expected '%s' and got '%s'\n%s",
+						test.expected_stdout, stdout, stderr,
+					) {
+						die = true
+						return
+					}
 				}
 			}
 		})
