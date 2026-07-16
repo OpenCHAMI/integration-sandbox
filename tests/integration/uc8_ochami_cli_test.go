@@ -150,6 +150,15 @@ func (r *ochami_runner) gen_access_token() error {
 		"--audience", "smd",
 		"--issuer", Endpoints["tokensmith"],
 	)
+
+	for k, v := range r.env {
+		cmd.Env = append(cmd.Env, k+"="+v)
+	}
+
+	for _, line := range os.Environ() {
+		cmd.Env = append(cmd.Env, line)
+	}
+
 	stdout, err := cmd.Output()
 	if err != nil {
 		return err
