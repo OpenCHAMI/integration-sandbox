@@ -193,6 +193,11 @@ func TestUC8_Ochami_CLI(t *testing.T) {
 			expected_stdout: `[{"description":"","label":"testing","members":{"ids":["x0c0s0b0"]}}]`,
 		},
 		{
+			name:            "smd group membership testing",
+			args:            []string{"smd", "group", "get", "--name", "testing"},
+			expected_stdout: `[{"description":"","label":"testing","members":{"ids":["x0c0s0b0"]}}]`,
+		},
+		{
 			name:            "ochami boot config add",
 			args:            []string{"boot", "config", "add", "-d", "@-", "-f", "json"},
 			expected_stdout: "",
