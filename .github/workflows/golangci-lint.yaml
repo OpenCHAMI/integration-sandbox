@@ -30,6 +30,6 @@ jobs:
         with:
           # `version` is the golangci-lint *binary* version, not the action.
           # Pinned so it stays in sync with the v2 schema in tests/.golangci.yml.
-          version: v2.12.2
+          version: v2.13.2
           working-directory: tests
           args: --build-tags=integration
