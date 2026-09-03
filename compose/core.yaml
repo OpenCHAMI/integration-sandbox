@@ -15,25 +15,37 @@ networks:
     external: true
 
 services:
+  # smd:
+  #   image: ${SBX_SMD_IMAGE:-ghcr.io/openchami/smd:2.17}
+  #   container_name: sandbox-smd
+  #   command:
+  #     - "/smd"
+  #     - "-dbhost=postgres"
+  #     - "-dbport=5432"
+  #     - "-dbuser=openchami"
+  #     - "-dbname=smd"
+  #     - "-dbtype=postgres"
+  #     - "-dbopts=password=openchami sslmode=disable"
+  #     - "-migrate"
+  #     # Discovery stays OFF (the new v2.19+ default). SMD's internal
+  #     # discovery walker is a CSM-era legacy path; in OpenCHAMI,
+  #     # magellan does BMC walks client-side and POSTs the discovered
+  #     # ComponentEndpoint/HardwareInventory data back to SMD via the
+  #     # ingest API. See compose/core.yaml::magellan-runner.
+  #     - "-http-listen=:27779"
+  #     - "-log=2"
+  #   ports:
+  #     - "127.0.0.1:27779:27779"
+  #   healthcheck:
+  #     test: ["CMD", "curl", "-fsS", "http://localhost:27779/hsm/v2/service/ready"]
+  #     interval: 5s
+  #     timeout: 3s
+  #     retries: 60
+  #   restart: unless-stopped
   smd:
-    image: ${SBX_SMD_IMAGE:-ghcr.io/openchami/smd:2.17}
+    image: inventory-service:latest
     container_name: sandbox-smd
-    command:
-      - "/smd"
-      - "-dbhost=postgres"
-      - "-dbport=5432"
-      - "-dbuser=openchami"
-      - "-dbname=smd"
-      - "-dbtype=postgres"
-      - "-dbopts=password=openchami sslmode=disable"
-      - "-migrate"
-      # Discovery stays OFF (the new v2.19+ default). SMD's internal
-      # discovery walker is a CSM-era legacy path; in OpenCHAMI,
-      # magellan does BMC walks client-side and POSTs the discovered
-      # ComponentEndpoint/HardwareInventory data back to SMD via the
-      # ingest API. See compose/core.yaml::magellan-runner.
-      - "-http-listen=:27779"
-      - "-log=2"
+    command: serve --port 27779 --database-url file:/data/inventory.db?_fk=1 --read-timeout 60 --write-timeout 60 --auth-enabled=false
     ports:
       - "127.0.0.1:27779:27779"
     healthcheck:
