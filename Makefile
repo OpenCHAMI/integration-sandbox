@@ -11,7 +11,7 @@ COMPOSE := docker compose -f compose/infra.yaml -f compose/bmc-sim.yaml -f compo
 # Export so scripts/load-images.sh sees it.
 export IMAGES
 
-.PHONY: help build-images up down seed test test-integration test-bats ci tail clean reset show-images refresh-releases
+.PHONY: help build-images up down seed token test test-integration test-bats ci tail clean reset show-images refresh-releases
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-20s %s\n", $$1, $$2}'
@@ -51,6 +51,9 @@ seed: ## Seed Vault, S3, and SMD with fixtures (idempotent)
 	@bash fixtures/vault-seed.sh
 	@bash fixtures/s3-buckets.sh
 	@bash fixtures/seed-smd.sh
+
+token:
+	@bash scripts/gen-token.sh
 
 test-integration: ## Run the Go integration suite against the running stack
 	@cd tests && go test -tags integration -count=1 -v -timeout 10m ./integration/...
