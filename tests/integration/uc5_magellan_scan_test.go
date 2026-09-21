@@ -179,7 +179,7 @@ func runMagellanPipeline(ctx context.Context, t *testing.T) {
 	script := fmt.Sprintf(`set -e
 printf '%%s\n' '%s' > /tmp/idmap.json
 /magellan scan https://x0c0s0b0 https://x0c0s1b0 https://x0c0s2b0 https://x0c0s3b0 https://x0c0s4b0 https://x0c0s5b0 https://x0c0s6b0 https://x0c0s7b0 --cache /tmp/assets.db -i
-/magellan collect --cache /tmp/assets.db -u root -p root_password -o /tmp/inventory.json --cacert '' --bmc-id-map @/tmp/idmap.json
+/magellan collect --cache /tmp/assets.db -u root -p root_password -o /tmp/inventory.json --bmc-id-map @/tmp/idmap.json
 /magellan send -d @/tmp/inventory.json http://smd:27779 --force-update
 `, idMapJSON)
 
