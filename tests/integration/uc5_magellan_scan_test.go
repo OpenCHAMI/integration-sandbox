@@ -176,10 +176,16 @@ func runMagellanPipeline(ctx context.Context, t *testing.T) {
 	// /tmp.
 	const idMapJSON = `{"map_key":"bmc-ip-addr","id_map":{"x0c0s0b0":"x0c0s0b0","x0c0s1b0":"x0c0s1b0","x0c0s2b0":"x0c0s2b0","x0c0s3b0":"x0c0s3b0","x0c0s4b0":"x0c0s4b0","x0c0s5b0":"x0c0s5b0","x0c0s6b0":"x0c0s6b0","x0c0s7b0":"x0c0s7b0"}}`
 
+	// scan is piped directly into collect (matching -F/-f json) rather than
+	// handed off via --cache: the pinned magellan:v0.6.0 image predates the
+	// issue #189 fix, so under `docker compose run` (non-terminal stdin)
+	// collect reads its empty stdin instead of the explicit --cache and
+	// errors with "data required to perform collect". Piping gives collect
+	// real data on stdin. -i replaces the removed --cacert flag for the
+	// self-signed BMC sims. send then reads the collected file explicitly.
 	script := fmt.Sprintf(`set -e
 printf '%%s\n' '%s' > /tmp/idmap.json
-/magellan scan https://x0c0s0b0 https://x0c0s1b0 https://x0c0s2b0 https://x0c0s3b0 https://x0c0s4b0 https://x0c0s5b0 https://x0c0s6b0 https://x0c0s7b0 --cache /tmp/assets.db -i
-/magellan collect --cache /tmp/assets.db -u root -p root_password -o /tmp/inventory.json --cacert '' --bmc-id-map @/tmp/idmap.json
+/magellan scan https://x0c0s0b0 https://x0c0s1b0 https://x0c0s2b0 https://x0c0s3b0 https://x0c0s4b0 https://x0c0s5b0 https://x0c0s6b0 https://x0c0s7b0 -i -F json | /magellan collect -f json -F json -u root -p root_password -o /tmp/inventory.json --bmc-id-map @/tmp/idmap.json -i
 /magellan send -d @/tmp/inventory.json http://smd:27779 --force-update
 `, idMapJSON)
 
