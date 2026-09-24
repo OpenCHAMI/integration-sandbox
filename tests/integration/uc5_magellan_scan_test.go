@@ -10,7 +10,6 @@ package integration
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"os/exec"
 	"strings"
@@ -171,11 +170,14 @@ func sortedKeys(m map[string]redfishEndpoint) []string {
 func runMagellanPipeline(ctx context.Context, t *testing.T) {
 	t.Helper()
 
-	// Heredoc wrapping for the id-map JSON. Embedded as a sh script so the
-	// scan + collect + send chain runs in a single container with a shared
-	// /tmp.
-	const idMapJSON = `{"map_key":"bmc-ip-addr","id_map":{"x0c0s0b0":"x0c0s0b0","x0c0s1b0":"x0c0s1b0","x0c0s2b0":"x0c0s2b0","x0c0s3b0":"x0c0s3b0","x0c0s4b0":"x0c0s4b0","x0c0s5b0":"x0c0s5b0","x0c0s6b0":"x0c0s6b0","x0c0s7b0":"x0c0s7b0"}}`
-
+	// The bmc-id-map must be keyed by the IP each host resolves to
+	// (map_key=bmc-ip-addr): collect runs net.LookupIP on the scanned
+	// hostname and matches the result against the map, so an xname->xname
+	// map never matches. Docker assigns the BMC sims dynamic IPs, so the map
+	// is built at runtime — each xname is resolved to its current IP (curl
+	// reports the connected remote_ip, and resolves via the same docker DNS
+	// collect uses) and written as an IP->xname entry before the pipeline.
+	//
 	// scan is piped directly into collect (matching -F/-f json) rather than
 	// handed off via --cache: the pinned magellan:v0.6.0 image predates the
 	// issue #189 fix, so under `docker compose run` (non-terminal stdin)
@@ -183,11 +185,21 @@ func runMagellanPipeline(ctx context.Context, t *testing.T) {
 	// errors with "data required to perform collect". Piping gives collect
 	// real data on stdin. -i replaces the removed --cacert flag for the
 	// self-signed BMC sims. send then reads the collected file explicitly.
-	script := fmt.Sprintf(`set -e
-printf '%%s\n' '%s' > /tmp/idmap.json
-/magellan scan https://x0c0s0b0 https://x0c0s1b0 https://x0c0s2b0 https://x0c0s3b0 https://x0c0s4b0 https://x0c0s5b0 https://x0c0s6b0 https://x0c0s7b0 -i -F json | /magellan collect -f json -F json -u root -p root_password -o /tmp/inventory.json --bmc-id-map @/tmp/idmap.json -i
+	const script = `set -e
+xnames="x0c0s0b0 x0c0s1b0 x0c0s2b0 x0c0s3b0 x0c0s4b0 x0c0s5b0 x0c0s6b0 x0c0s7b0"
+printf '{"map_key":"bmc-ip-addr","id_map":{' > /tmp/idmap.json
+sep=""
+hosts=""
+for xn in $xnames; do
+  ip=$(curl -sk -o /dev/null -w '%{remote_ip}' https://$xn)
+  printf '%s"%s":"%s"' "$sep" "$ip" "$xn" >> /tmp/idmap.json
+  sep=","
+  hosts="$hosts https://$xn"
+done
+printf '}}' >> /tmp/idmap.json
+/magellan scan $hosts -i -F json | /magellan collect -f json -F json -u root -p root_password -o /tmp/inventory.json --bmc-id-map @/tmp/idmap.json -i
 /magellan send -d @/tmp/inventory.json http://smd:27779 --force-update
-`, idMapJSON)
+`
 
 	cmd := exec.CommandContext(ctx,
 		"docker", "compose",
