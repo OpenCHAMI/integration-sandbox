@@ -52,6 +52,7 @@ services:
       - "serve"
       - "--port=27780"
       - "--issuer=http://tokensmith:27780"
+      - "--oidc-issuer=http://tokensmith:27780"
       - "--cluster-id=sandbox"
       - "--openchami-id=sandbox"
       - "--key-dir=/tokensmith/keys"
