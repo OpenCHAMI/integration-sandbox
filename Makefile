@@ -53,7 +53,7 @@ seed: ## Seed Vault, S3, and SMD with fixtures (idempotent)
 	@bash fixtures/seed-smd.sh
 
 test-integration: ## Run the Go integration suite against the running stack
-	@cd tests && go test -tags integration -count=1 -v -timeout 10m ./integration/...
+	@bash -c 'source scripts/load-images.sh && cd tests && go test -tags integration -count=1 -v -timeout 10m ./integration/...'
 
 uc1: ## UC1 — populate SMD with nodes, verify visibility in boot-service + metadata-service
 	@cd tests && go test -tags integration -count=1 -v -timeout 5m -run '^TestUC1_' ./integration/...
