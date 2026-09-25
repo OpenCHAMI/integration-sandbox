@@ -37,6 +37,17 @@ for img in "${PULL_LIST[@]}"; do
   fi
 done
 
+# sushy-tools patched: the stock --fake driver can't advertise a per-node
+# EthernetInterface IP (see images/sushy/Dockerfile), which SMD requires. Build
+# a thin patched image on top of the pulled base so UC5/UC6 get valid, unique
+# per-node MAC+IP data. bmc-sim.yaml references this fixed local tag.
+SBX_SUSHY_PATCHED_IMAGE="openchami-sandbox/sushy-tools:patched"
+printf '[build] %s (patched from %s)\n' "$SBX_SUSHY_PATCHED_IMAGE" "$SBX_SUSHY_IMAGE"
+docker build -q \
+  --build-arg BASE="$SBX_SUSHY_IMAGE" \
+  -t "$SBX_SUSHY_PATCHED_IMAGE" \
+  "$ROOT/images/sushy" >/dev/null
+
 # IPMI sim is built from sibling repo (no public image expected).
 # Skip if SKIP_SIM is set to true.
 if [[ "${SKIP_SIM:-false}" == "true" ]]; then
