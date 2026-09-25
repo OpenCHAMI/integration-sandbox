@@ -178,13 +178,11 @@ func runMagellanPipeline(ctx context.Context, t *testing.T) {
 	// reports the connected remote_ip, and resolves via the same docker DNS
 	// collect uses) and written as an IP->xname entry before the pipeline.
 	//
-	// scan is piped directly into collect (matching -F/-f json) rather than
-	// handed off via --cache: the pinned magellan:v0.6.0 image predates the
-	// issue #189 fix, so under `docker compose run` (non-terminal stdin)
-	// collect reads its empty stdin instead of the explicit --cache and
-	// errors with "data required to perform collect". Piping gives collect
-	// real data on stdin. -i replaces the removed --cacert flag for the
-	// self-signed BMC sims. send then reads the collected file explicitly.
+	// scan hands off to collect via --cache: magellan:v0.6.1 includes the
+	// issue #189 fix (collect honors an explicit --cache regardless of
+	// stdin), so the cache DB works under `docker compose run` non-terminal
+	// stdin. -i replaces the removed --cacert flag for the self-signed BMC
+	// sims. send then reads the collected file explicitly.
 	const script = `set -e
 xnames="x0c0s0b0 x0c0s1b0 x0c0s2b0 x0c0s3b0 x0c0s4b0 x0c0s5b0 x0c0s6b0 x0c0s7b0"
 printf '{"map_key":"bmc-ip-addr","id_map":{' > /tmp/idmap.json
@@ -197,7 +195,8 @@ for xn in $xnames; do
   hosts="$hosts https://$xn"
 done
 printf '}}' >> /tmp/idmap.json
-/magellan scan $hosts -i -F json | /magellan collect -f json -F json -u root -p root_password -o /tmp/inventory.json --bmc-id-map @/tmp/idmap.json -i
+/magellan scan $hosts -i --cache /tmp/assets.db
+/magellan collect --cache /tmp/assets.db -u root -p root_password -o /tmp/inventory.json --bmc-id-map @/tmp/idmap.json -i
 /magellan send -d @/tmp/inventory.json http://smd:27779 --force-update
 `
 
