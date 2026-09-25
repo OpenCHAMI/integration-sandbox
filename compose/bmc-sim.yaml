@@ -27,7 +27,11 @@ networks:
     external: true
 
 x-redfish-bmc: &redfish-bmc
-  image: ${SBX_SUSHY_IMAGE:-quay.io/metal3-io/sushy-tools:latest}
+  # Patched sushy-tools (images/sushy/Dockerfile, built by build-images.sh):
+  # keeps the --fake driver but advertises a unique per-node MAC + valid IPv4 on
+  # the EthernetInterface, which the stock --fake image drops (breaking magellan
+  # -> SMD ingestion in UC5/UC6).
+  image: openchami-sandbox/sushy-tools:patched
   # Image runs as root (verified) so binding :443 is fine without
   # CAP_NET_BIND_SERVICE. Entrypoint generates a throwaway TLS cert
   # then exec's sushy-emulator. Power-state changes in --fake mode
