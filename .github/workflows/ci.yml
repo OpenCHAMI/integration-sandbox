@@ -363,6 +363,14 @@ jobs:
         env:
           UC_LOG: ${{ runner.temp }}/${{ matrix.id }}.log
         run: |
+          # pipefail: without it `go test | tee` always exits 0, so a red UC
+          # still reported a green check (UC5/UC6 false greens).
+          set -euo pipefail
+          # Manifest: workflow-level SBX_*_IMAGE resolve to "" on
+          # pull_request runs; fill them from images/*.env so compose stops
+          # falling back to :latest for magellan-runner. Caller-set
+          # values (workflow_dispatch overrides) still win.
+          source ../scripts/load-images.sh
           go test -tags integration -count=1 -v -timeout ${{ matrix.go_timeout }} -run '${{ matrix.test_re }}' ./integration/... 2>&1 | tee "$UC_LOG"
 
       # Pass matrix values via env so the shell never tries to interpret
