@@ -79,7 +79,7 @@ func TestUC5_Magellan_SMD(t *testing.T) {
 	baseline := redfishEndpointCount(ctx, t, smdURL)
 
 	// Step 2: run the canonical magellan pipeline. The script bootstraps
-	// the BMC ID map (xname→xname for our hostname-aliased BMCs), scans
+	// the BMC ID map (BMC-sim container IP → xname), scans
 	// the 8 hosts, collects inventory, and POSTs the result to SMD.
 	runMagellanPipeline(ctx, t)
 
@@ -178,14 +178,12 @@ func sortedKeys(m map[string]redfishEndpoint) []string {
 //     IPv4 — whereas v0.5.1 used the scan address (the hostname), which is
 //     why xname keys worked there. The scan itself still targets the
 //     x0c0sNb0 aliases, so FQDN/Hostname stay xname-shaped.
-//   - collect's stdin is pinned to /dev/null so the pipeline behaves the
-//     same with and without a TTY. magellan ≥ v0.6.0 only reads --cache
-//     when IsStdinEmpty() reports a character-device stdin; the
-//     non-TTY `docker compose run` that `go test` performs hands the
-//     container a fifo instead, which magellan misreads as "piped data",
-//     finds nothing, and exits 1. /dev/null is the honest "no piped
-//     input" signal and keeps data flowing scan → cache → collect as
-//     documented. Drop the redirect once upstream fixes IsStdinEmpty.
+//   - collect runs with stdin left alone: magellan ≥ v0.6.1 honors --cache
+//     regardless of stdin (OpenCHAMI/magellan#189), so the `< /dev/null`
+//     redirect that pre-v0.6.1 builds needed — a non-TTY `docker compose
+//     run` hands the container a fifo that IsStdinEmpty() misread as
+//     piped data, making collect find nothing and exit 1 — is gone. The
+//     image pin (images/default.env) must stay ≥ v0.6.1 for that to hold.
 func runMagellanPipeline(ctx context.Context, t *testing.T) {
 	t.Helper()
 
@@ -195,7 +193,7 @@ func runMagellanPipeline(ctx context.Context, t *testing.T) {
 printf '%%s\n' '%s' > /tmp/idmap.json
 /magellan scan https://x0c0s0b0 https://x0c0s1b0 https://x0c0s2b0 https://x0c0s3b0 https://x0c0s4b0 https://x0c0s5b0 https://x0c0s6b0 https://x0c0s7b0 --cache /tmp/assets.db -i
 stat /tmp/assets.db
-/magellan collect --cache /tmp/assets.db -u root -p root_password -o /tmp/inventory.json --bmc-id-map @/tmp/idmap.json -i < /dev/null
+/magellan collect --cache /tmp/assets.db -u root -p root_password -o /tmp/inventory.json --bmc-id-map @/tmp/idmap.json -i
 stat /tmp/inventory.json
 /magellan send -d @/tmp/inventory.json http://smd:27779 --force-update
 `, idMapJSON)
