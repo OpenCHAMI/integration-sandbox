@@ -160,26 +160,43 @@ func sortedKeys(m map[string]redfishEndpoint) []string {
 }
 
 // runMagellanPipeline runs the documented one-shot magellan-runner
-// invocation. The shell snippet is deliberately inlined rather than carried
-// in a fixture file because:
+// invocation: scan → collect (fed from the scan cache) → send. The shell
+// snippet is deliberately inlined rather than carried in a fixture file
+// because:
 //   - The id-map references the 8 fixture xnames specifically; if the fixture
 //     count changes, this snippet must change too — co-locating keeps the
 //     two in sync without a third source-of-truth file.
 //   - The runner overrides the entrypoint to /magellan, so we have to
 //     re-override to sh -c to chain three subcommands. Inlining makes that
 //     explicit at the call site.
+//
+// Two details here are load-bearing and easy to regress:
+//
+//   - The id-map is keyed by the BMC sims' *container IPs* (see
+//     bmcIDMapJSON), not by xname: magellan ≥ v0.6.0 accepts exactly one
+//     map_key, "bmc-ip-addr", and looks it up by the target's resolved
+//     IPv4 — whereas v0.5.1 used the scan address (the hostname), which is
+//     why xname keys worked there. The scan itself still targets the
+//     x0c0sNb0 aliases, so FQDN/Hostname stay xname-shaped.
+//   - collect's stdin is pinned to /dev/null so the pipeline behaves the
+//     same with and without a TTY. magellan ≥ v0.6.0 only reads --cache
+//     when IsStdinEmpty() reports a character-device stdin; the
+//     non-TTY `docker compose run` that `go test` performs hands the
+//     container a fifo instead, which magellan misreads as "piped data",
+//     finds nothing, and exits 1. /dev/null is the honest "no piped
+//     input" signal and keeps data flowing scan → cache → collect as
+//     documented. Drop the redirect once upstream fixes IsStdinEmpty.
 func runMagellanPipeline(ctx context.Context, t *testing.T) {
 	t.Helper()
 
-	// Heredoc wrapping for the id-map JSON. Embedded as a sh script so the
-	// scan + collect + send chain runs in a single container with a shared
-	// /tmp.
-	const idMapJSON = `{"map_key":"bmc-ip-addr","id_map":{"x0c0s0b0":"x0c0s0b0","x0c0s1b0":"x0c0s1b0","x0c0s2b0":"x0c0s2b0","x0c0s3b0":"x0c0s3b0","x0c0s4b0":"x0c0s4b0","x0c0s5b0":"x0c0s5b0","x0c0s6b0":"x0c0s6b0","x0c0s7b0":"x0c0s7b0"}}`
+	idMapJSON := bmcIDMapJSON(t)
 
 	script := fmt.Sprintf(`set -e
 printf '%%s\n' '%s' > /tmp/idmap.json
 /magellan scan https://x0c0s0b0 https://x0c0s1b0 https://x0c0s2b0 https://x0c0s3b0 https://x0c0s4b0 https://x0c0s5b0 https://x0c0s6b0 https://x0c0s7b0 --cache /tmp/assets.db -i
-/magellan collect --cache /tmp/assets.db -u root -p root_password -o /tmp/inventory.json --bmc-id-map @/tmp/idmap.json
+stat /tmp/assets.db
+/magellan collect --cache /tmp/assets.db -u root -p root_password -o /tmp/inventory.json --bmc-id-map @/tmp/idmap.json -i < /dev/null
+stat /tmp/inventory.json
 /magellan send -d @/tmp/inventory.json http://smd:27779 --force-update
 `, idMapJSON)
 
@@ -188,7 +205,7 @@ printf '%%s\n' '%s' > /tmp/idmap.json
 		"-f", "../../compose/infra.yaml",
 		"-f", "../../compose/bmc-sim.yaml",
 		"-f", "../../compose/core.yaml",
-		"run", "--rm",
+		"run", "--rm", "--remove-orphans",
 		"--entrypoint", "sh",
 		"magellan-runner",
 		"-c", script,
@@ -200,4 +217,59 @@ printf '%%s\n' '%s' > /tmp/idmap.json
 	// magellan emits a noisy "config file not found" warning that's
 	// harmless. Surface its real signals only when the test fails (above).
 	_ = strings.TrimSpace(string(out))
+}
+
+// bmcIDMapJSON returns magellan's `--bmc-id-map` document with the BMC sims'
+// container IPs as keys and their xnames as values.
+//
+// magellan ≥ v0.6.0 validates that map_key is "bmc-ip-addr" and resolves the
+// selector to the target's IPv4, so the map has to be keyed by address. The
+// compose network hands those out dynamically (and the magellan image ships
+// no resolver of its own — no getent/nslookup), so Docker is asked directly:
+// its answer for the sandbox-redfish-* containers is exactly what the
+// x0c0sNb0 aliases resolve to from inside the compose network, i.e. the same
+// value magellan will look up.
+//
+// Each line of `docker inspect` output carries the container's hostname too,
+// so a fixture/compose drift (container renamed, index shifted) fails loudly
+// instead of silently producing an id-map that never matches.
+func bmcIDMapJSON(t *testing.T) string {
+	t.Helper()
+
+	args := []string{"inspect", "-f",
+		`{{.Config.Hostname}} {{(index .NetworkSettings.Networks "openchami-sandbox").IPAddress}}`}
+	for i := range Xnames {
+		args = append(args, fmt.Sprintf("sandbox-redfish-%d", i))
+	}
+	out, err := exec.Command("docker", args...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("docker inspect (BMC sim IPs): %v\noutput:\n%s", err, string(out))
+	}
+
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	if len(lines) != len(Xnames) {
+		t.Fatalf("expected %d BMC sims from docker inspect, got %d:\n%s",
+			len(Xnames), len(lines), string(out))
+	}
+
+	var b strings.Builder
+	b.WriteString(`{"map_key":"bmc-ip-addr","id_map":{`)
+	for i, line := range lines {
+		fields := strings.Fields(line)
+		if len(fields) != 2 || fields[1] == "" {
+			t.Fatalf("BMC sim %d: cannot read hostname/IP from docker inspect line %q (is the stack up?)",
+				i, line)
+		}
+		hostname, ip := fields[0], fields[1]
+		if hostname != Xnames[i] {
+			t.Fatalf("container sandbox-redfish-%d reports hostname %q, want %q — fixture and compose have drifted",
+				i, hostname, Xnames[i])
+		}
+		if i > 0 {
+			b.WriteString(",")
+		}
+		fmt.Fprintf(&b, "%q:%q", ip, hostname)
+	}
+	b.WriteString("}}")
+	return b.String()
 }
