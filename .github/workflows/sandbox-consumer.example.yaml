@@ -87,6 +87,10 @@ jobs:
         working-directory: integration-sandbox
         run: make ci
 
+      - name: make ci (release)
+        working-directory: integration-sandbox
+        run: make ci IMAGES=release
+
       - name: Upload log bundle on failure
         if: failure()
         uses: actions/upload-artifact@v7.0.1
