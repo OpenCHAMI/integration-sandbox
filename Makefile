@@ -52,8 +52,13 @@ seed: ## Seed Vault, S3, and SMD with fixtures (idempotent)
 	@bash fixtures/s3-buckets.sh
 	@bash fixtures/seed-smd.sh
 
+# Source the active manifest into the test process: `go test` spawns
+# `docker compose run magellan-runner`, and compose resolves ${SBX_*_IMAGE}
+# from that process's environment only — without this the pin in
+# images/*.env never reaches it and compose falls back to :latest.
+# Values exported by the caller still win (load-images.sh caller-wins).
 test-integration: ## Run the Go integration suite against the running stack
-	@cd tests && go test -tags integration -count=1 -v -timeout 10m ./integration/...
+	@bash -c 'set -euo pipefail; source scripts/load-images.sh; cd tests && go test -tags integration -count=1 -v -timeout 10m ./integration/...'
 
 uc1: ## UC1 — populate SMD with nodes, verify visibility in boot-service + metadata-service
 	@cd tests && go test -tags integration -count=1 -v -timeout 5m -run '^TestUC1_' ./integration/...
