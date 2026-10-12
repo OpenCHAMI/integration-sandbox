@@ -10,10 +10,9 @@
 # jobs, so the old infra-up / bmc-sim-up / core-up / seed / teardown jobs
 # (b4c74c7) couldn't carry state forward and have been removed.
 #
-# UC1-UC7 are emitted by a single `test-uc` matrix job. Per-UC GitHub
+# UC1-UC8 are emitted by a single `test-uc` matrix job. Per-UC GitHub
 # status checks are preserved (each appears as "test-uc (uc<N>)"), but the
-# 7 UCs run in parallel after test-bats instead of chained — wall-clock for
-# the UC stage drops from ~7×5min to ~5min for the same billed minutes.
+# 8 UCs run in parallel after test-bats instead of chained.
 #
 # The workflow exposes:
 # - SKIP_SIM: skip building/starting ipmi-sim and remote-console (default: true)
@@ -243,10 +242,10 @@ jobs:
         run: bash scripts/down.sh || true
 
   # ──────────────────────────────────────────────────────────────────────────
-  # UC1-UC7: integration use cases.
+  # UC1-UC8: integration use cases.
   #
-  # One job, seven matrix entries. Each entry runs on its own runner with a
-  # fresh stack bring-up, so all 7 UCs execute in parallel after test-bats.
+  # One job, eight matrix entries. Each entry runs on its own runner with a
+  # fresh stack bring-up, so all 8 UCs execute in parallel after test-bats.
   # `fail-fast: false` lets every UC complete even if one fails — useful
   # for diagnosis. Per-UC metadata (label, timeouts, services/assertions
   # blurbs for $GITHUB_STEP_SUMMARY, doc link) lives in matrix.include
@@ -317,6 +316,14 @@ jobs:
             services: "fru-tracker"
             assertions: "POST a 32-device discovery snapshot (8 nodes × CPU + 2 DIMMs); poll until reconciler completes; verify parent/child UID linkage in the device tree."
             doc: uc7-fru-discovery.md
+          - id: uc8
+            label: "UC8: Ochami CLI"
+            timeout: 20
+            go_timeout: 10m
+            test_re: '^TestUC8_'
+            services: "ochami CLI, tokensmith, SMD, boot-service, power-control"
+            assertions: "Run the CLI binary against live services; verify SMD group membership, boot configuration round-trip, and power status; clean up owned records."
+            doc: uc8-ochami-cli.md
     steps:
       - name: Checkout
         uses: actions/checkout@v7.0.1
