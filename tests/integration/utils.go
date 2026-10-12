@@ -22,25 +22,24 @@ func LoadImages() (map[string]string, error) {
 		manifest = "../../images/" + images + ".env"
 	}
 
-	f, err := os.Open(manifest)
+	data, err := os.ReadFile(manifest)
 	if err != nil {
 		return nil, fmt.Errorf("unable to open manifest '%s': %v", manifest, err)
 	}
-	defer f.Close()
-
 	ret := make(map[string]string)
-	s := bufio.NewScanner(f)
-	n := 0
+	s := bufio.NewScanner(strings.NewReader(string(data)))
 	for s.Scan() {
-		n += 1
 		line := strings.TrimSpace(s.Text())
 		if line == "" || line[0] == '#' {
 			continue
 		}
 		key, value, _ := strings.Cut(line, "=")
 		if key != "" { // Failing silently is expected behavior?
+			if override := os.Getenv(key); override != "" {
+				value = override
+			}
 			ret[key] = value
 		}
 	}
-	return ret, nil
+	return ret, s.Err()
 }
