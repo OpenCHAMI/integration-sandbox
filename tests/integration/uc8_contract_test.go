@@ -63,9 +63,26 @@ func TestUC8_FailureContracts(t *testing.T) {
 		{"invalid_yaml", "spec: [", []string{"boot", "--uri", "http://127.0.0.1:1", "config", "add", "-d", "@-", "-f", "yaml"}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
+			var requests atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				requests.Add(1)
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(201)
+				if _, err := fmt.Fprint(w, `{"apiVersion":"v1","kind":"BootConfiguration","metadata":{"uid":"unexpected-write"},"spec":{"kernel":"http://fake-address/vmlinuz"},"status":{}}`); err != nil {
+					t.Errorf("write fixture: %v", err)
+				}
+			}))
+			defer server.Close()
 			r := uc8ContractRunner(t)
-			result := r.execute(CLIInput{IgnoreConfig: true, Stdin: test.stdin}, test.args...)
+			args := append([]string{}, test.args...)
+			for i, arg := range args {
+				if arg == "http://127.0.0.1:1" {
+					args[i] = uc8FixtureURL(server.URL)
+				}
+			}
+			result := r.execute(CLIInput{IgnoreConfig: true, Stdin: test.stdin}, args...)
 			requireUC8CLIFailure(t, r, result)
+			require.Zero(t, requests.Load(), "invalid input must be rejected before any service request or mutation")
 		})
 	}
 	for _, test := range []struct {

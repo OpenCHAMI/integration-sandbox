@@ -158,10 +158,15 @@ func (r *ochami_runner) removeCanceledInvocation(name string, composeArgs []stri
 		}
 	}
 	// Inspect first: an already removed --rm invocation requires no action.
-	if exec.CommandContext(ctx, "docker", "inspect", name).Run() == nil {
-		if output, err := exec.CommandContext(ctx, "docker", "rm", "-f", name).CombinedOutput(); err != nil {
+	removeCtx, removeCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer removeCancel()
+	output, inspectErr := exec.CommandContext(removeCtx, "docker", "inspect", name).CombinedOutput()
+	if inspectErr == nil {
+		if output, err := exec.CommandContext(removeCtx, "docker", "rm", "-f", name).CombinedOutput(); err != nil {
 			failures = append(failures, fmt.Errorf("remove owned invocation: %w: %s", err, output))
 		}
+	} else if !strings.Contains(string(output), "No such object") && !strings.Contains(string(output), "No such container") {
+		failures = append(failures, fmt.Errorf("verify canceled invocation removal: %w: %s", inspectErr, output))
 	}
 	return errors.Join(failures...)
 }
