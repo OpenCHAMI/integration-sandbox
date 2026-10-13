@@ -394,7 +394,7 @@ func TestUC8_Ochami_CLI(t *testing.T) {
 		uc8Command(t, r, "", "boot", "config", "delete", "--no-confirm", uid)
 	})
 	t.Run("pcs_status", func(t *testing.T) {
-		r := runner(t, 3*time.Minute)
+		r := runner(t, 8*time.Minute)
 		prepareToken(t, r)
 		ensureBMCDiscovered(r.ctx, t, Endpoints["smd"], "x0c0s0b0", env)
 		require.NoError(t, waitUC8PCSReady(r.ctx, "x0c0s0b0"))
@@ -402,5 +402,49 @@ func TestUC8_Ochami_CLI(t *testing.T) {
 		var status uc8PowerStatus
 		require.NoError(t, json.Unmarshal([]byte(out), &status))
 		require.NoError(t, status.ready("x0c0s0b0"), "CLI status: %s", out)
+		const node = "x0c0s0b0n0"
+		waitForComponentEndpoint(r.ctx, t, Endpoints["smd"], node, 30*time.Second)
+		clearReservation(r.ctx, t, Endpoints["smd"], node)
+		require.NoError(t, waitForPCSComponent(r.ctx, Endpoints["power"], node))
+		systemPath, err := discoverFirstSystemPath(r.ctx, Endpoints["redfish-bmc"], "root", "root_password")
+		require.NoError(t, err)
+		systemURI := Endpoints["redfish-bmc"] + systemPath
+		t.Cleanup(func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+			defer cancel()
+			if err := redfishReset(ctx, systemURI, "root", "root_password", "On"); err != nil {
+				t.Errorf("restore BMC On: %v", err)
+				return
+			}
+			if got := waitRedfishPowerState(ctx, t, systemURI, "root", "root_password", "On"); got != "On" {
+				t.Errorf("restoring BMC state: %s", got)
+			}
+		})
+		require.NoError(t, redfishReset(r.ctx, systemURI, "root", "root_password", "On"))
+		require.Equal(t, "On", waitRedfishPowerState(r.ctx, t, systemURI, "root", "root_password", "On"))
+		_, err = waitForPCSPowerState(r.ctx, Endpoints["power"], node, "On", time.Minute)
+		require.NoError(t, err)
+		for _, transition := range []struct{ operation, redfishState string }{{"force-off", "Off"}, {"on", "On"}} {
+			var started pcsTransitionResp
+			require.NoError(t, json.Unmarshal([]byte(uc8Command(t, r, "", "pcs", "transition", "start", "--xname", node, transition.operation)), &started))
+			require.NotEmpty(t, started.TransitionID)
+			monitor := *r
+			monitorCtx, monitorCancel := context.WithTimeout(r.ctx, 90*time.Second)
+			monitor.ctx = monitorCtx
+			result := monitor.execute(CLIInput{}, "pcs", "transition", "monitor", started.TransitionID, "--poll-interval", "1")
+			monitorCancel()
+			require.NoError(t, result.Err, result.Stderr)
+			var completed pcsTransitionResp
+			require.NoError(t, json.Unmarshal([]byte(uc8Command(t, r, "", "pcs", "transition", "show", started.TransitionID, "-F", "json")), &completed))
+			require.Equal(t, started.TransitionID, completed.TransitionID)
+			require.Equal(t, "completed", completed.TransitionStatus)
+			require.Len(t, completed.Tasks, 1)
+			require.Equal(t, node, completed.Tasks[0].Xname)
+			require.Equal(t, "succeeded", completed.Tasks[0].TaskStatus)
+			require.Empty(t, completed.Tasks[0].Error)
+			require.Equal(t, transition.redfishState, waitRedfishPowerState(r.ctx, t, systemURI, "root", "root_password", transition.redfishState))
+			_, err = waitForPCSPowerState(r.ctx, Endpoints["power"], node, transition.redfishState, time.Minute)
+			require.NoError(t, err)
+		}
 	})
 }
