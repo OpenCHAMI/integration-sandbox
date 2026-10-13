@@ -130,15 +130,23 @@ func (r *ochami_runner) gen_access_token() error {
 
 // cleanupUC8Resources tolerates absent records but reports all other failures.
 // HTTP cleanup does not depend on the CLI context, which may have expired.
+type uc8CleanupScope struct{ Group, Configs, Nodes bool }
+
 func cleanupUC8Resources(ctx context.Context, name, token string) error {
+	return cleanupUC8Owned(ctx, name, token, uc8CleanupScope{Group: true, Configs: true})
+}
+
+func cleanupUC8Owned(ctx context.Context, name, token string, scope uc8CleanupScope) error {
 	var failures []error
+	client := *httpClient
+	client.Timeout = 5 * time.Second
 	request := func(method, uri string) (*http.Response, error) {
 		req, err := http.NewRequestWithContext(ctx, method, uri, nil)
 		if err != nil {
 			return nil, err
 		}
 		req.Header.Set("Authorization", "Bearer "+token)
-		return httpClient.Do(req)
+		return client.Do(req)
 	}
 	remove := func(uri string) {
 		resp, err := request(http.MethodDelete, uri)
@@ -147,43 +155,51 @@ func cleanupUC8Resources(ctx context.Context, name, token string) error {
 			return
 		}
 		defer resp.Body.Close()
-		if (resp.StatusCode < 200 || resp.StatusCode >= 300) && resp.StatusCode != http.StatusNotFound {
+		if (resp.StatusCode < 200 || resp.StatusCode >= 300) && resp.StatusCode != 404 {
 			failures = append(failures, fmt.Errorf("DELETE %s: HTTP %d", uri, resp.StatusCode))
 		}
 	}
-
-	bootURI := Endpoints["boot"] + "/bootconfigurations"
-	resp, err := request(http.MethodGet, bootURI)
-	if err != nil {
-		failures = append(failures, fmt.Errorf("list boot configurations: %w", err))
-	} else {
-		defer resp.Body.Close()
-		if resp.StatusCode != http.StatusOK {
-			failures = append(failures, fmt.Errorf("list boot configurations: HTTP %d", resp.StatusCode))
-		} else {
-			var configs []struct {
-				Metadata struct {
-					Name string `json:"name"`
-					UID  string `json:"uid"`
-				} `json:"metadata"`
+	for _, collection := range []struct {
+		path, kind string
+		enabled    bool
+	}{{"/bootconfigurations", "boot configurations", scope.Configs}, {"/nodes", "boot nodes", scope.Nodes}} {
+		if !collection.enabled {
+			continue
+		}
+		uri := Endpoints["boot"] + collection.path
+		resp, err := request(http.MethodGet, uri)
+		if err != nil {
+			failures = append(failures, fmt.Errorf("list %s: %w", collection.kind, err))
+			continue
+		}
+		var resources []struct {
+			Metadata struct{ Name, UID string } `json:"metadata"`
+		}
+		if resp.StatusCode != 200 {
+			failures = append(failures, fmt.Errorf("list %s: HTTP %d", collection.kind, resp.StatusCode))
+			resp.Body.Close()
+			continue
+		}
+		err = json.NewDecoder(resp.Body).Decode(&resources)
+		resp.Body.Close()
+		if err != nil {
+			failures = append(failures, fmt.Errorf("decode %s: %w", collection.kind, err))
+			continue
+		}
+		for _, resource := range resources {
+			if resource.Metadata.Name != name {
+				continue
 			}
-			if err := json.NewDecoder(resp.Body).Decode(&configs); err != nil {
-				failures = append(failures, fmt.Errorf("decode boot configurations: %w", err))
-			} else {
-				for _, config := range configs {
-					if config.Metadata.Name != name {
-						continue
-					}
-					if config.Metadata.UID == "" {
-						failures = append(failures, fmt.Errorf("boot configuration %s has no UID", name))
-						continue
-					}
-					remove(bootURI + "/" + config.Metadata.UID)
-				}
+			if resource.Metadata.UID == "" {
+				failures = append(failures, fmt.Errorf("owned %s %s has no UID", collection.kind, name))
+				continue
 			}
+			remove(uri + "/" + resource.Metadata.UID)
 		}
 	}
-	remove(Endpoints["smd"] + "/hsm/v2/groups/" + name)
+	if scope.Group {
+		remove(Endpoints["smd"] + "/hsm/v2/groups/" + name)
+	}
 	return errors.Join(failures...)
 }
 
@@ -288,20 +304,20 @@ func TestUC8_Ochami_CLI(t *testing.T) {
 		r.ctx, r.t = ctx, t
 		return &r
 	}
-	cleanupRegistered := false
+	scope := uc8CleanupScope{}
+	cleanupToken := ""
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		if err := cleanupUC8Owned(ctx, resourceName, cleanupToken, scope); err != nil {
+			t.Errorf("clean up CLI resources: %v", err)
+		}
+	})
 	prepareToken := func(child *testing.T, r *ochami_runner) {
 		child.Helper()
 		require.NoError(child, r.gen_access_token(), "mint access token")
-		if !cleanupRegistered {
-			cleanupRegistered = true
-			token := r.access_token
-			t.Cleanup(func() {
-				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-				defer cancel()
-				if err := cleanupUC8Resources(ctx, resourceName, token); err != nil {
-					t.Errorf("clean up CLI resources: %v", err)
-				}
-			})
+		if cleanupToken == "" {
+			cleanupToken = r.access_token
 		}
 	}
 
@@ -314,6 +330,7 @@ func TestUC8_Ochami_CLI(t *testing.T) {
 	t.Run("smd_group_membership", func(t *testing.T) {
 		r := runner(t, time.Minute)
 		prepareToken(t, r)
+		scope.Group = true
 		require.Empty(t, uc8Command(t, r, "", "smd", "group", "add", resourceName))
 		require.Empty(t, uc8Command(t, r, "", "smd", "group", "member", "add", resourceName, "x0c0s0b0"))
 		out := uc8Command(t, r, "", "smd", "group", "get", "--name", resourceName)
@@ -342,6 +359,7 @@ func TestUC8_Ochami_CLI(t *testing.T) {
 	t.Run("boot_configuration", func(t *testing.T) {
 		r := runner(t, 2*time.Minute)
 		prepareToken(t, r)
+		scope.Configs = true
 		input := fmt.Sprintf(`{"metadata":{"name":%q},"spec":{"kernel":"http://fake-address/vmlinuz","initrd":"http://fake-address/initramfs.img","params":"nomodeset ro root=live:http://fake-address/fake-image","macs":["02:00:00:00:00:00"]}}`, resourceName)
 		require.Empty(t, uc8Command(t, r, input, "boot", "config", "add", "-d", "@-", "-f", "json"))
 		out := uc8Command(t, r, "", "boot", "config", "list")

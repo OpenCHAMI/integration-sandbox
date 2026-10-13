@@ -8,11 +8,15 @@ package integration
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -81,4 +85,104 @@ func TestUC8_CleanupPreservesOtherResources(t *testing.T) {
 			require.Equal(t, test.wantDeleted, deleted)
 		})
 	}
+}
+
+type uc8RoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f uc8RoundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestUC8_CleanupTransport(t *testing.T) {
+	for _, kind := range []string{"connection_failure", "interrupted_list", "request_deadline", "canceled_parent"} {
+		t.Run(kind, func(t *testing.T) {
+			var groupDeletes atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodDelete && r.URL.Path == "/hsm/v2/groups/uc8-owned" {
+					groupDeletes.Add(1)
+					w.WriteHeader(204)
+					return
+				}
+				if kind == "interrupted_list" {
+					conn, _, err := w.(http.Hijacker).Hijack()
+					if err != nil {
+						t.Errorf("hijack: %v", err)
+						return
+					}
+					if _, err := io.WriteString(conn, "HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\n["); err != nil {
+						t.Errorf("write interrupted reply: %v", err)
+					}
+					if err := conn.Close(); err != nil {
+						t.Errorf("close interrupted reply: %v", err)
+					}
+					return
+				}
+				if _, err := fmt.Fprint(w, "[]"); err != nil {
+					t.Errorf("write list: %v", err)
+				}
+			}))
+			defer server.Close()
+			oldBoot, oldSMD := Endpoints["boot"], Endpoints["smd"]
+			oldClient := httpClient
+			Endpoints["boot"], Endpoints["smd"] = server.URL, server.URL
+			t.Cleanup(func() { Endpoints["boot"], Endpoints["smd"] = oldBoot, oldSMD; httpClient = oldClient })
+			if kind == "connection_failure" {
+				closed := httptest.NewServer(http.NotFoundHandler())
+				Endpoints["boot"] = closed.URL
+				closed.Close()
+			}
+			if kind == "request_deadline" {
+				copyClient := *httpClient
+				transport := copyClient.Transport
+				copyClient.Transport = uc8RoundTripFunc(func(r *http.Request) (*http.Response, error) {
+					if r.Method == http.MethodGet {
+						return nil, context.DeadlineExceeded
+					}
+					return transport.RoundTrip(r)
+				})
+				httpClient = &copyClient
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			if kind == "canceled_parent" {
+				cancel()
+			}
+			err := cleanupUC8Resources(ctx, "uc8-owned", "test-token")
+			require.Error(t, err)
+			if kind == "canceled_parent" {
+				require.ErrorIs(t, err, context.Canceled)
+				require.Zero(t, groupDeletes.Load())
+			} else {
+				require.Equal(t, int32(1), groupDeletes.Load())
+			}
+			if kind == "request_deadline" {
+				require.True(t, errors.Is(err, context.DeadlineExceeded))
+				require.NoError(t, ctx.Err(), "an operation failure must not consume the overall cleanup budget")
+			}
+		})
+	}
+}
+
+func TestUC8_CleanupOwnershipScope(t *testing.T) {
+	var mu sync.Mutex
+	var paths []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		paths = append(paths, r.Method+" "+r.URL.Path)
+		mu.Unlock()
+		if r.Method == http.MethodGet && r.URL.Path == "/nodes" {
+			if _, err := fmt.Fprint(w, `[{"metadata":{"name":"uc8-owned","uid":"owned-node"}},{"metadata":{"name":"fixture-node","uid":"other-node"}}]`); err != nil {
+				t.Errorf("write nodes: %v", err)
+			}
+			return
+		}
+		w.WriteHeader(204)
+	}))
+	defer server.Close()
+	oldBoot := Endpoints["boot"]
+	Endpoints["boot"] = server.URL
+	t.Cleanup(func() { Endpoints["boot"] = oldBoot })
+	require.NoError(t, cleanupUC8Owned(context.Background(), "uc8-owned", "test-token", uc8CleanupScope{}))
+	require.NoError(t, cleanupUC8Owned(context.Background(), "uc8-owned", "test-token", uc8CleanupScope{Nodes: true}))
+	mu.Lock()
+	defer mu.Unlock()
+	require.Equal(t, []string{"GET /nodes", "DELETE /nodes/owned-node"}, paths)
 }
