@@ -314,11 +314,26 @@ func TestUC8_Ochami_CLI(t *testing.T) {
 		require.Empty(t, uc8Command(t, r, "", "smd", "group", "member", "add", resourceName, "x0c0s0b0"))
 		out := uc8Command(t, r, "", "smd", "group", "get", "--name", resourceName)
 		require.JSONEq(t, fmt.Sprintf(`[{"description":"","label":%q,"members":{"ids":["x0c0s0b0"]}}]`, resourceName), out)
+		require.JSONEq(t, `{"ids":["x0c0s0b0"]}`, uc8Command(t, r, "", "smd", "group", "member", "get", resourceName))
+		uc8Command(t, r, "", "smd", "group", "update", "--description", "uc8 updated", "--tag", resourceName, resourceName)
+		var updated []struct {
+			Label       string   `json:"label"`
+			Description string   `json:"description"`
+			Tags        []string `json:"tags"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(uc8Command(t, r, "", "smd", "group", "get", "--name", resourceName)), &updated))
+		require.Len(t, updated, 1)
+		require.Equal(t, resourceName, updated[0].Label)
+		require.Equal(t, "uc8 updated", updated[0].Description)
+		require.Contains(t, updated[0].Tags, resourceName)
+		require.JSONEq(t, `{"ids":["x0c0s0b0"]}`, uc8Command(t, r, "", "smd", "group", "member", "get", resourceName), "description/tag update must preserve membership")
 
 		require.Empty(t, uc8Command(t, r, "", "smd", "group", "member", "delete", "--no-confirm", resourceName, "x0c0s0b0"))
-		out = uc8Command(t, r, "", "smd", "group", "get", "--name", resourceName)
-		require.JSONEq(t, fmt.Sprintf(`[{"description":"","label":%q,"members":{"ids":[]}}]`, resourceName), out,
+		out = uc8Command(t, r, "", "smd", "group", "member", "get", resourceName)
+		require.JSONEq(t, `{"ids":[]}`, out,
 			"member deletion must be observable in the group GET")
+		uc8Command(t, r, "", "smd", "group", "delete", "--no-confirm", resourceName)
+		require.JSONEq(t, `[]`, uc8Command(t, r, "", "smd", "group", "get", "--name", resourceName))
 	})
 	t.Run("boot_configuration", func(t *testing.T) {
 		r := runner(t, time.Minute)
