@@ -30,9 +30,19 @@ on:
     branches: [main]
     paths:
       - "images/**.env"
+      - "tests/**"
+      - "compose/**"
+      - "scripts/**"
+      - "Makefile"
+      - ".github/workflows/ci.yml"
   pull_request:
     paths:
       - "images/**.env"
+      - "tests/**"
+      - "compose/**"
+      - "scripts/**"
+      - "Makefile"
+      - ".github/workflows/ci.yml"
   workflow_dispatch:
     inputs:
       images:
@@ -317,13 +327,27 @@ jobs:
             assertions: "POST a 32-device discovery snapshot (8 nodes × CPU + 2 DIMMs); poll until reconciler completes; verify parent/child UID linkage in the device tree."
             doc: uc7-fru-discovery.md
           - id: uc8
-            label: "UC8: Ochami CLI"
-            timeout: 20
-            go_timeout: 10m
+            label: "UC8: Ochami CLI (default)"
+            images: default
+            timeout: 60
+            go_timeout: 20m
+            repetitions: 2
             test_re: '^TestUC8_'
             services: "ochami CLI, tokensmith, SMD, boot-service, power-control, magellan, sushy-tools"
-            assertions: "Validate CLI version output; add/read/remove SMD membership; round-trip a boot configuration; discover BMC inventory and wait for PCS readiness before reading status; clean up owned records."
+            assertions: "Run all UC8 contracts twice against the same seeded stack; verify CRUD, CLI errors, configuration, cancellation, and independent Redfish transition results."
             doc: uc8-ochami-cli.md
+          - id: uc8-release
+            label: "UC8: Ochami CLI (release)"
+            images: release
+            timeout: 60
+            go_timeout: 20m
+            repetitions: 2
+            test_re: '^TestUC8_'
+            services: "ochami CLI, tokensmith, SMD, boot-service, power-control, magellan, sushy-tools"
+            assertions: "Run all UC8 contracts twice against the same seeded stack; verify CRUD, CLI errors, configuration, cancellation, and independent Redfish transition results."
+            doc: uc8-ochami-cli.md
+    env:
+      IMAGES: ${{ matrix.images || inputs.images || 'default' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7.0.1
@@ -366,6 +390,7 @@ jobs:
           AWS_ENDPOINT_URL: http://127.0.0.1:4566
 
       - name: "Run ${{ matrix.label }} tests"
+        id: uc_tests
         working-directory: tests
         env:
           UC_LOG: ${{ runner.temp }}/${{ matrix.id }}.log
@@ -378,7 +403,16 @@ jobs:
           # falling back to :latest for magellan-runner. Caller-set
           # values (workflow_dispatch overrides) still win.
           source ../scripts/load-images.sh
-          go test -tags integration -count=1 -v -timeout ${{ matrix.go_timeout }} -run '${{ matrix.test_re }}' ./integration/... 2>&1 | tee "$UC_LOG"
+          : > "$UC_LOG"
+          for attempt in $(seq 1 ${{ matrix.repetitions || 1 }}); do
+            attempt_log="${UC_LOG%.log}-run${attempt}.log"
+            {
+              printf 'Manifest: %s; attempt: %s\n' "$IMAGES" "$attempt"
+              env | sort | sed -n '/^SBX_.*_IMAGE=/p'
+              docker compose -f ../compose/infra.yaml -f ../compose/bmc-sim.yaml -f ../compose/core.yaml images
+              go test -tags integration -count=1 -v -timeout ${{ matrix.go_timeout }} -run '${{ matrix.test_re }}' ./integration/...
+            } 2>&1 | tee "$attempt_log" | tee -a "$UC_LOG"
+          done
 
       # Pass matrix values via env so the shell never tries to interpret
       # backticks or other punctuation that may appear in the assertions
@@ -391,14 +425,18 @@ jobs:
           UC_ASSERTIONS: ${{ matrix.assertions }}
           UC_DOC: ${{ matrix.doc }}
           UC_LOG: ${{ runner.temp }}/${{ matrix.id }}.log
+          UC_TEST_OUTCOME: ${{ steps.uc_tests.outcome }}
         run: |
+          set -euo pipefail
+          report_log_dir="logs/$(date -u +%Y%m%dT%H%M%SZ)"
+          mkdir -p "$report_log_dir"
+          exec > >(tee "$report_log_dir/${{ matrix.id }}-summary.log") 2>&1
           {
             echo "## $UC_LABEL"
             echo ""
             echo "**Services:** $UC_SERVICES"
             echo ""
-            if [ -f "$UC_LOG" ]; then
-              if grep -q "PASS" "$UC_LOG"; then
+              if [ "$UC_TEST_OUTCOME" = "success" ]; then
                 echo "✅ **Status:** PASSED"
               else
                 echo "❌ **Status:** FAILED"
@@ -407,8 +445,7 @@ jobs:
               echo "**Assertions:** $UC_ASSERTIONS"
               echo ""
               echo "📄 [Use case documentation](../blob/main/docs/use-cases/$UC_DOC)"
-            fi
-          } >> "$GITHUB_STEP_SUMMARY"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Capture logs on failure
         if: failure()
@@ -422,6 +459,7 @@ jobs:
           path: |
             logs/
             ${{ runner.temp }}/${{ matrix.id }}.log
+            ${{ runner.temp }}/${{ matrix.id }}-run*.log
           retention-days: 30
           if-no-files-found: ignore
 
