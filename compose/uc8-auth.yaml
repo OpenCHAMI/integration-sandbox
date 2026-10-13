@@ -1,0 +1,27 @@
+# Isolated authentication contract stack. Never combine with compose/core.yaml.
+services:
+  tokensmith:
+    image: ${SBX_TOKENSMITH_IMAGE:?load images first}
+    entrypoint: ["/sbin/tini", "--"]
+    command: ["tokensmith", "serve", "--port=27780", "--issuer=http://tokensmith:27780", "--oidc-issuer=http://tokensmith:27780", "--cluster-id=sandbox", "--openchami-id=sandbox", "--key-dir=/tokensmith/keys", "--rfc8693-bootstrap-store=/tokensmith/data/bootstrap-tokens", "--rfc8693-refresh-store=/tokensmith/data/refresh-tokens", "--enable-local-user-mint"]
+    environment:
+      TOKENSMITH_CONFIG: ""
+    tmpfs:
+      - /tokensmith/keys:mode=1777
+      - /tokensmith/data:mode=1777
+    # Only the externally driven boot API needs a published port.
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:27780/.well-known/jwks.json"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+  boot-service:
+    image: ${SBX_BOOT_IMAGE:?load images first}
+    command: ["serve", "--port=27791", "--enable-auth", "--tokensmith-url=http://tokensmith:27780", "--jwks-endpoint=http://tokensmith:27780/.well-known/jwks.json", "--hsm-url=", "--hsm-sync-enabled=false", "--data-dir=/data"]
+    tmpfs:
+      - /data:mode=1777
+    ports:
+      - "127.0.0.1:27791:27791"
+    depends_on:
+      tokensmith:
+        condition: service_healthy

@@ -22,10 +22,7 @@
 name: ci
 
 on:
-  # Auto-trigger only when an image manifest changes. The harness itself
-  # (scripts, fixtures, compose, tests) doesn't get re-run on every push
-  # because the test surface is the image set — code changes can be
-  # validated with workflow_dispatch when needed.
+  # Validate image updates and changes to the integration harness itself.
   push:
     branches: [main]
     paths:
@@ -261,6 +258,33 @@ jobs:
   # blurbs for $GITHUB_STEP_SUMMARY, doc link) lives in matrix.include
   # so adding or tweaking a UC is one block, not 90 lines of copy-paste.
   # ──────────────────────────────────────────────────────────────────────────
+  test-uc8-auth:
+    name: "UC8: Boot authentication (${{ matrix.images }})"
+    needs: test-bats
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        images: [default, release]
+    env:
+      IMAGES: ${{ matrix.images }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-go@v7.0.0
+        with:
+          go-version-file: tests/go.mod
+          cache-dependency-path: tests/go.sum
+      - name: Run isolated authentication contracts
+        run: bash scripts/uc8-auth.sh
+      - name: Upload authentication diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: uc8-auth-${{ matrix.images }}-${{ github.run_id }}
+          path: logs/
+          retention-days: 30
+
   test-uc:
     name: "${{ matrix.label }}"
     needs: test-bats
@@ -403,6 +427,9 @@ jobs:
           # falling back to :latest for magellan-runner. Caller-set
           # values (workflow_dispatch overrides) still win.
           source ../scripts/load-images.sh
+          test_log_dir="../logs/$(date -u +%Y%m%dT%H%M%SZ)"
+          mkdir -p "$test_log_dir"
+          exec > >(tee "$test_log_dir/${{ matrix.id }}-tests.log") 2>&1
           : > "$UC_LOG"
           for attempt in $(seq 1 ${{ matrix.repetitions || 1 }}); do
             attempt_log="${UC_LOG%.log}-run${attempt}.log"
