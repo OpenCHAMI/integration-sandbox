@@ -8,7 +8,6 @@
 package integration
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -87,45 +86,9 @@ func (r *ochami_runner) sync_config() (err error) {
 	return nil
 }
 
-func (r *ochami_runner) run(stdin string, args []string) (stdout string, stderr string, err error) {
-	stdin_reader := strings.NewReader(stdin)
-
-	stdout_writer := bytes.NewBuffer(nil)
-	stderr_writer := bytes.NewBuffer(nil)
-
-	abs_config_path, err := filepath.Abs(r.config_path)
-	if err != nil {
-		return "", "", fmt.Errorf("unable to resolve config file path: %w", err)
-	}
-
-	cmd := exec.CommandContext(r.ctx,
-		"docker", "compose",
-		"-f", "../../compose/infra.yaml",
-		"-f", "../../compose/bmc-sim.yaml",
-		"-f", "../../compose/core.yaml",
-		"run", "--rm", "-T",
-		"--volume", abs_config_path+":/config.yaml",
-		"--entrypoint", "ochami",
-		"--env", "TEST_ACCESS_TOKEN="+r.access_token,
-		"ochami-runner",
-		"--config", "/config.yaml",
-	)
-
-	cmd.Env = os.Environ()
-	for k, v := range r.env {
-		cmd.Env = append(cmd.Env, k+"="+v)
-	}
-
-	cmd.Args = append(cmd.Args, args...)
-
-	cmd.Stdin = stdin_reader
-	cmd.Stdout = stdout_writer
-	cmd.Stderr = stderr_writer
-
-	err = cmd.Run()
-	stdout = stdout_writer.String()
-	stderr = stderr_writer.String()
-	return
+func (r *ochami_runner) run(stdin string, args []string) (string, string, error) {
+	result := r.execute(CLIInput{Stdin: stdin}, args...)
+	return result.Stdout, result.Stderr, result.Err
 }
 
 func (r *ochami_runner) gen_access_token() error {
