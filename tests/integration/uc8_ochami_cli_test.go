@@ -335,6 +335,9 @@ func TestUC8_Ochami_CLI(t *testing.T) {
 		r := runner(t, time.Minute)
 		prepareToken(t, r)
 		scope.Group = true
+		component := uc8Resource(t, uc8Command(t, r, "", "smd", "component", "get", "--xname", "x0c0s0b0n0", "-F", "json"), "json")
+		require.Equal(t, "x0c0s0b0n0", component["ID"])
+		require.Equal(t, "Node", component["Type"])
 		require.Empty(t, uc8Command(t, r, "", "smd", "group", "add", resourceName))
 		require.Empty(t, uc8Command(t, r, "", "smd", "group", "member", "add", resourceName, "x0c0s0b0"))
 		out := uc8Command(t, r, "", "smd", "group", "get", "--name", resourceName)
@@ -462,6 +465,12 @@ func TestUC8_Ochami_CLI(t *testing.T) {
 		require.NoError(t, status.ready("x0c0s0b0"), "CLI status: %s", out)
 		const node = "x0c0s0b0n0"
 		waitForComponentEndpoint(r.ctx, t, Endpoints["smd"], node, 30*time.Second)
+		var inventory struct {
+			ComponentEndpoints []struct{ ID string } `json:"ComponentEndpoints"`
+		}
+		require.NoError(t, json.Unmarshal([]byte(uc8Command(t, r, "", "smd", "compep", "get", node, "-F", "json")), &inventory))
+		require.Len(t, inventory.ComponentEndpoints, 1)
+		require.Equal(t, node, inventory.ComponentEndpoints[0].ID)
 		clearReservation(r.ctx, t, Endpoints["smd"], node)
 		require.NoError(t, waitForPCSComponent(r.ctx, Endpoints["power"], node))
 		systemPath, err := discoverFirstSystemPath(r.ctx, Endpoints["redfish-bmc"], "root", "root_password")
