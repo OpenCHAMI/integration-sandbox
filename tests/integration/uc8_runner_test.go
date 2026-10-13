@@ -49,7 +49,7 @@ func (r *ochami_runner) envelopeArgs(args []string) ([]string, error) {
 		return args, nil
 	}
 	if !r.bootModeChecked {
-		result := r.execute(CLIInput{IgnoreConfig: true}, "boot", "--help")
+		result := r.execute(CLIInput{IgnoreConfig: true}, "boot", "config", "--help")
 		if result.Err != nil {
 			return nil, fmt.Errorf("inspect boot API mode: %w: %s", result.Err, result.Stderr)
 		}
@@ -57,7 +57,7 @@ func (r *ochami_runner) envelopeArgs(args []string) ([]string, error) {
 		r.bootModeChecked = true
 	}
 	if r.bootEnvelope {
-		return append([]string{"boot", "--envelope"}, args[1:]...), nil
+		return append(append([]string{}, args...), "--envelope"), nil
 	}
 	return args, nil
 }
