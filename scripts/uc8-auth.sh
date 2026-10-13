@@ -35,7 +35,8 @@ finish() {
 }
 trap finish EXIT
 # The unique project owns every service created below, including partial up.
-if [[ -n "$("${compose[@]}" ps -aq)" ]]; then
+existing="$("${compose[@]}" ps -aq)"
+if [[ -n "$existing" ]]; then
   printf 'Refusing to adopt existing project %s\n' "$UC8_AUTH_PROJECT"
   exit 1
 fi

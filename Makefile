@@ -58,7 +58,7 @@ seed: ## Seed Vault, S3, and SMD with fixtures (idempotent)
 # images/*.env never reaches it and compose falls back to :latest.
 # Values exported by the caller still win (load-images.sh caller-wins).
 test-integration: ## Run the Go integration suite against the running stack
-	@bash -c 'set -euo pipefail; source scripts/load-images.sh; cd tests && go test -tags integration -count=1 -v -timeout 10m ./integration/...'
+	@bash -c 'set -euo pipefail; source scripts/load-images.sh; cd tests && go test -tags integration -count=1 -v -timeout 30m ./integration/...'
 
 uc1: ## UC1 — populate SMD with nodes, verify visibility in boot-service + metadata-service
 	@cd tests && go test -tags integration -count=1 -v -timeout 5m -run '^TestUC1_' ./integration/...

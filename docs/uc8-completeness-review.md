@@ -1,60 +1,49 @@
 # UC8 completeness review
 
-UC8 is a partial CLI integration smoke suite. It exercises the containerized
-binary and stateful service round-trips. It does not cover the complete
-Ochami command surface or prove authentication enforcement.
+UC8 implements the approved runner, failure, configuration, CRUD,
+transition, cleanup, and repeatability gaps. Full-stack verification and
+upstream compatibility gaps remain open.
 
-## Current coverage
-
-| Area | Live integration assertions | Isolated regression assertions |
+| Area | Implemented assertions | Validation on 2026-10-13 |
 | --- | --- | --- |
-| Version | Nonempty Version, Go, and Compiler output; release and development values accepted | Six cases: valid release/development, empty/unstructured output, missing compiler, empty version |
-| SMD | Create a unique group, add a member, GET membership, delete the member without confirmation, GET an empty member list | None; these operations require live SMD |
-| Boot | Create a uniquely named configuration using JSON on stdin, list it, verify UID and payload, ignore unrelated configurations | Ownership filtering is exercised by cleanup tests |
-| PCS | Run Magellan discovery, wait for a healthy BMC entry, validate CLI xname/error/power/management fields | Seven readiness cases: convergence, component error, empty list, wrong component, stale state, malformed JSON, HTTP failure |
-| Cleanup | Independently delete owned boot configuration UIDs and SMD group after the service flows | Seven cases: HTTP 200/204 success, 404 absence, deletion failure, listing failure, malformed listing, missing UID; unrelated resources preserved |
+| Runner | Separate stdout/stderr/exit status, stdin, read-only JSON/YAML mounts, environment/config overrides, unique container ownership | Real CLI fixture tests pass with race detection |
+| Failures | Invalid command/flag/input, HTTP 404/500, malformed response, inaccessible endpoint; rejected input sends no mutation | Default PR image and release v0.10.4 pass |
+| Configuration | Default/explicit cluster, cluster/service URI, environment/explicit/suppressed token, ignored config, conflicting flags | Default PR #169 passes; release v0.10.4 fails explicit cluster selection |
+| Timeout/cancellation | Request deadline, cancellation after request starts, diagnostics and owned container removal | Both CLI images pass |
+| SMD | Group create/get/update/delete; membership add/get/delete; description/tags preserve membership; seeded component reads | Implemented; live run blocked by stopped Postgres/unhealthy SMD |
+| Boot configuration | JSON stdin/file creation; UID get; JSON/pretty/YAML equivalence; YAML replacement; preserving merge patch; CLI delete and missing-resource failure | Passed twice against existing boot v0.3.2 with default CLI |
+| Profile | Configuration spec.profile persistence through replacement and patch | Passed; organizational label, no separate resource or bootscript-selection assertion |
+| Boot node | Owned stdin create/list/get, YAML replacement/read, merge patch, CLI delete; reserved xname collision guard | Passed twice against existing boot v0.3.2 with default CLI |
+| PCS | Discovery/readiness/status and inventory; force-off/on CLI start/monitor/show; successful task plus independent Redfish state; restore On | Implemented; live flow unverified on unhealthy stack |
+| Legacy cloud-init | Defaults, group raw/metadata, node metadata/user-data GET routes and formats | HTTP-fixture contracts pass; pinned metadata has no legacy admin routes |
+| Cleanup | Exact-name/UID scopes, HTTP failures, interrupted bodies, transport deadlines, canceled context; independent removals | Race-tested helpers pass; twice-run boot cleanup succeeds |
+| CI | Default/release jobs; two runs without reseeding; 20-minute test/60-minute job budgets; per-attempt logs/image identities; actual step outcome | YAML/static checks pass; hosted runs outstanding |
+| Authentication | Separate boot/tokensmith stack; valid RSA, missing, wrong signature, expired signature beyond two-minute skew; independent HTTP enforcement plus CLI checks | Profile and occupancy guard checked; boot v0.3.2 lacks inbound middleware, so rejection tests are expected to fail |
 
-Four independent integration subtests have separate command budgets. A
-failed SMD flow no longer prevents boot or PCS coverage. Version execution
-does not depend on token minting. The standalone Go timeout accommodates
-all service budgets and cleanup.
+The default CLI uses the immutable published [PR #169](https://github.com/OpenCHAMI/ochami/pull/169)
+image, digest `sha256:94a4d4e35287a77f107c4739f53388537a659244f53d8b94d76b80bbc1c52c6b`.
+Its reported build commit is `215bda0006c21d0ddcc43a031bf1daeb80553570`.
+Release remains v0.10.4: retain the explicit-cluster regression as a failing
+compatibility assertion. Token forwarding was fixed by merged
+[PR #112](https://github.com/OpenCHAMI/ochami/pull/112).
 
-PCS checks BMC availability after discovery. A successful BMC manager
-response produces the expected `on` state; this does not demonstrate node
-power transitions. UC6 tests those transitions through the service API.
+Metadata image v3.5 reports source commit
+`bc4e60c31fdb39722c0fea88ea687ca55ffc2cd9`; its
+[server wiring](https://github.com/OpenCHAMI/metadata-service/blob/bc4e60c31fdb39722c0fea88ea687ca55ffc2cd9/cmd/server/server_extensions.go)
+exposes modern resources and rendering, without legacy admin routes.
+Successful fixtures do not close this live integration gap. Modern ochami
+metadata lifecycle coverage remains additional work.
 
-## Remaining gaps
+Authentication tests require real service rejection. The
+[boot v0.3.2 server](https://github.com/OpenCHAMI/boot-service/blob/v0.3.2/cmd/server/main.go)
+does not attach inbound JWT middleware even with enable-auth. A configured
+probe returned HTTP 200 without a token. No open boot-service PR found
+during this work supplies that wiring. Scope, issuer, audience,
+refresh/exchange, and authorization policy are not claimed as covered by
+these signature/expiry tests.
 
-1. CLI failure behavior: malformed input, missing resources, invalid flags,
-   inaccessible endpoints, and expected nonzero exits and stderr are untested.
-2. Additional mutations: group updates/deletion, direct member GET, boot
-   GET/update/delete, and PCS transition commands are untested. Current
-   cleanup uses HTTP APIs rather than CLI delete commands.
-3. Other command families: cloud-init, boot nodes/profiles, and the rest of
-   the SMD and PCS command surfaces are outside UC8.
-4. Authentication: tokens are minted and passed to the CLI, but the harness
-   runs boot authentication disabled and uses development token settings.
-   Invalid/expired tokens, refresh/exchange, scopes, and audience enforcement
-   require a separate enforcing configuration.
-5. Configuration and presentation: alternate clusters, endpoint precedence,
-   file input, other output formats, and CLI timeout behavior are untested.
-6. Cleanup transport failures and cancellation are not simulated. An abruptly
-   killed test process cannot run cleanup; unique names avoid collisions but
-   leave records for later diagnosis.
-
-## Validation and limits
-
-The 20 isolated regression cases passed with the race detector. Integration
-test compilation, go vet, and golangci-lint passed. These results establish
-helper behavior and static correctness, not compatibility with running CLI
-images and services.
-
-A full live UC8 run and consecutive-run verification remain outstanding:
-the existing stack has stopped Postgres and unhealthy SMD. Diagnostics were
-captured under `logs/20261012T205622Z/uc8-validation/`. No containers were
-changed to bypass the failure protocol.
-
-Once a healthy seeded stack is available, run `make uc8` twice against the
-same stack, then run the complete integration suite to check ordering with
-UC5 and UC6 discovery. Validate both the default PR image and release CLI
-manifest before treating UC8 as verified across supported image sets.
+Remaining verification: run both full UC8 jobs twice on healthy seeded
+stacks, inspect SMD/PCS side effects, run auth contracts against an enforcing
+service, and run the full suite for interactions with UC5/UC6. Abrupt kills
+can still leave uniquely named records because Go cleanup cannot run. The
+existing stack was preserved; no upstream code was patched here.
