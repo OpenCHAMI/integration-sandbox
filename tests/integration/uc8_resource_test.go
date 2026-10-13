@@ -57,6 +57,10 @@ func uc8Resource(t *testing.T, output, format string) map[string]any {
 	data, err := json.Marshal(result)
 	require.NoError(t, err)
 	require.NoError(t, json.Unmarshal(data, &result))
+	// YAML omitempty suppresses the empty status object emitted by JSON.
+	if _, exists := result["status"]; !exists {
+		result["status"] = map[string]any{}
+	}
 	return result
 }
 

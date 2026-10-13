@@ -80,7 +80,11 @@ func (r *ochami_runner) sync_config() (err error) {
 		}
 	}()
 
-	err = tmpl.Execute(f, Endpoints)
+	containerEndpoints := make(map[string]string, len(Endpoints))
+	for name, uri := range Endpoints {
+		containerEndpoints[name] = uc8FixtureURL(uri)
+	}
+	err = tmpl.Execute(f, containerEndpoints)
 	if err != nil {
 		return fmt.Errorf("config template execution error: %w", err)
 	}
@@ -383,18 +387,20 @@ func TestUC8_Ochami_CLI(t *testing.T) {
 			require.Equal(t, before, uc8Resource(t, uc8Command(t, r, "", "boot", "config", "get", uid, "-F", format), format))
 		}
 		path := uc8PayloadFile(t, "set.yaml", map[string]any{"metadata": before["metadata"], "spec": map[string]any{
-			"kernel": "http://fake-address/vmlinuz", "initrd": "http://fake-address/initramfs.img", "params": "uc8-replaced", "macs": []string{"02:00:00:00:00:00"},
+			"kernel": "http://fake-address/vmlinuz", "initrd": "http://fake-address/initramfs.img", "params": "uc8-replaced", "macs": []string{"02:00:00:00:00:00"}, "profile": resourceName,
 		}}, "yaml")
 		uc8InputCommand(t, r, CLIInput{Files: map[string]string{path: "/fixtures/set.yaml"}}, "boot", "config", "set", uid, "-d", "@/fixtures/set.yaml", "-f", "yaml")
 		changed := uc8Resource(t, uc8Command(t, r, "", "boot", "config", "get", uid, "-F", "json"), "json")
 		spec, ok := changed["spec"].(map[string]any)
 		require.True(t, ok)
 		require.Equal(t, "uc8-replaced", spec["params"])
+		require.Equal(t, resourceName, spec["profile"])
 		uc8Command(t, r, "", "boot", "config", "patch", uid, "--patch-method", "rfc7386", "-d", `{"params":"uc8-patched"}`)
 		changed = uc8Resource(t, uc8Command(t, r, "", "boot", "config", "get", uid, "-F", "json"), "json")
 		spec, ok = changed["spec"].(map[string]any)
 		require.True(t, ok)
 		require.Equal(t, "uc8-patched", spec["params"])
+		require.Equal(t, resourceName, spec["profile"], "patch preserves the configuration profile label")
 		require.Equal(t, "http://fake-address/vmlinuz", spec["kernel"])
 		require.Equal(t, "http://fake-address/initramfs.img", spec["initrd"])
 		require.Equal(t, []any{"02:00:00:00:00:00"}, spec["macs"])
@@ -410,6 +416,40 @@ func TestUC8_Ochami_CLI(t *testing.T) {
 		created := uc8Resource(t, uc8Command(t, r, "", "boot", "config", "get", uid, "-F", "json"), "json")
 		require.Equal(t, before["spec"], created["spec"])
 		uc8Command(t, r, "", "boot", "config", "delete", "--no-confirm", uid)
+	})
+	t.Run("boot_node", func(t *testing.T) {
+		r := runner(t, 2*time.Minute)
+		prepareToken(t, r)
+		// Refuse to replace a shared fleet record with our owned fixture.
+		var existing []map[string]any
+		require.NoError(t, json.Unmarshal([]byte(uc8Command(t, r, "", "boot", "node", "list")), &existing))
+		for _, node := range existing {
+			if spec, ok := node["spec"].(map[string]any); ok {
+				require.NotEqual(t, "x0c0s0b0n1", spec["xname"], "fleet node already exists; leave it untouched")
+			}
+		}
+		scope.Nodes = true
+		input := fmt.Sprintf(`{"metadata":{"name":%q},"spec":{"xname":"x0c0s0b0n1","hostname":"uc8-original","role":"Compute"}}`, resourceName)
+		uc8Command(t, r, input, "boot", "node", "add", "-d", "@-", "-f", "json")
+		uid := uc8ResourceUID(t, r, "node", resourceName)
+		before := uc8Resource(t, uc8Command(t, r, "", "boot", "node", "get", uid, "-F", "json"), "json")
+		spec := before["spec"].(map[string]any)
+		require.Equal(t, "x0c0s0b0n1", spec["xname"])
+		require.Equal(t, "uc8-original", spec["hostname"])
+		path := uc8PayloadFile(t, "node.yaml", map[string]any{"metadata": before["metadata"], "spec": map[string]any{"xname": "x0c0s0b0n1", "hostname": "uc8-replaced", "role": "Compute"}}, "yaml")
+		uc8InputCommand(t, r, CLIInput{Files: map[string]string{path: "/fixtures/node.yaml"}}, "boot", "node", "set", uid, "-d", "@/fixtures/node.yaml", "-f", "yaml")
+		changed := uc8Resource(t, uc8Command(t, r, "", "boot", "node", "get", uid, "-F", "yaml"), "yaml")
+		require.Equal(t, "uc8-replaced", changed["spec"].(map[string]any)["hostname"])
+		uc8Command(t, r, "", "boot", "node", "patch", uid, "--patch-method", "rfc7386", "-d", `{"hostname":"uc8-patched"}`)
+		changed = uc8Resource(t, uc8Command(t, r, "", "boot", "node", "get", uid, "-F", "json"), "json")
+		spec = changed["spec"].(map[string]any)
+		require.Equal(t, "uc8-patched", spec["hostname"])
+		require.Equal(t, "x0c0s0b0n1", spec["xname"])
+		require.Equal(t, "Compute", spec["role"])
+		uc8Command(t, r, "", "boot", "node", "delete", "--no-confirm", uid)
+		result := r.execute(CLIInput{}, "boot", "node", "get", uid)
+		requireUC8CLIFailure(t, r, result)
+		require.Regexp(t, `(?i)(404|not found)`, result.Stderr)
 	})
 	t.Run("pcs_status", func(t *testing.T) {
 		r := runner(t, 8*time.Minute)
