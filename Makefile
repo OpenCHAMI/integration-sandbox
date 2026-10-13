@@ -72,7 +72,7 @@ uc3: ## UC3 — restart each container; confirm node register/read still works
 uc-all: uc1 uc2 uc3 ## Run all use-case suites in sequence
 
 uc8: ## UC8 — Ochami CLI against live SMD, boot-service, and power-control
-	@bash -c 'set -euo pipefail; source scripts/load-images.sh; cd tests && go test -tags integration -count=1 -v -timeout 5m -run "^TestUC8_" ./integration/...'
+	@bash -c 'set -euo pipefail; source scripts/load-images.sh; cd tests && go test -tags integration -count=1 -v -timeout 10m -run "^TestUC8_" ./integration/...'
 
 test-bats: ## Run the bats CLI smoke suite against the running stack
 	@bats tests/bats/

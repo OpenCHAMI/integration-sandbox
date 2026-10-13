@@ -22,7 +22,7 @@ import (
 	"text/template"
 	"time"
 
-	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // UC8 exercises the CLI binary against live services. Unique resource names
@@ -222,209 +222,170 @@ func cleanupUC8Resources(ctx context.Context, name, token string) error {
 	return errors.Join(failures...)
 }
 
+// validateUC8Version accepts release and development build values while requiring
+// the identifying fields printed by the CLI's version command.
+func validateUC8Version(out string) error {
+	fields := make(map[string]string)
+	for _, line := range strings.Split(out, "\n") {
+		key, value, ok := strings.Cut(line, ":")
+		if ok {
+			fields[strings.TrimSpace(key)] = strings.TrimSpace(value)
+		}
+	}
+	for _, key := range []string{"Version", "Go", "Compiler"} {
+		if fields[key] == "" {
+			return fmt.Errorf("version output missing nonempty %s field", key)
+		}
+	}
+	return nil
+}
+
+type uc8PowerStatus struct {
+	Xname           string `json:"xname"`
+	Error           string `json:"error"`
+	PowerState      string `json:"powerState"`
+	ManagementState string `json:"managementState"`
+}
+
+func (s uc8PowerStatus) ready(xname string) error {
+	if s.Xname != xname || s.Error != "" || s.PowerState != "on" || s.ManagementState != "available" {
+		return fmt.Errorf("PCS component not ready: %+v", s)
+	}
+	return nil
+}
+
+// waitUC8PCSReady checks service data, not just HTTP 200: PCS returns error
+// entries with a successful HTTP status while discovery or sampling is pending.
+func waitUC8PCSReady(ctx context.Context, xname string) error {
+	var lastErr error
+	for {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+			Endpoints["power"]+"/v1/power-status?xname="+xname, nil)
+		if err != nil {
+			return err
+		}
+		resp, err := httpClient.Do(req)
+		if err == nil {
+			var body struct {
+				Status []uc8PowerStatus `json:"status"`
+			}
+			if resp.StatusCode != http.StatusOK {
+				err = fmt.Errorf("PCS status: HTTP %d", resp.StatusCode)
+			} else if err = json.NewDecoder(resp.Body).Decode(&body); err == nil {
+				err = fmt.Errorf("PCS returned no status for %s", xname)
+				for _, status := range body.Status {
+					if status.Xname == xname {
+						err = status.ready(xname)
+						break
+					}
+				}
+			}
+			resp.Body.Close()
+		}
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("waiting for PCS %s: %w (last response: %v)", xname, ctx.Err(), lastErr)
+		case <-time.After(2 * time.Second):
+		}
+	}
+}
+
+func uc8Command(t *testing.T, r *ochami_runner, stdin string, args ...string) string {
+	t.Helper()
+	stdout, stderr, err := r.run(stdin, args)
+	require.NoErrorf(t, err, "ochami %v failed: %s", args, stderr)
+	return strings.TrimSpace(stdout)
+}
+
 func TestUC8_Ochami_CLI(t *testing.T) {
-	// Each run owns a unique group and boot configuration, including on a
-	// persistent stack with unrelated records or leftovers from interrupted runs.
 	resourceName := fmt.Sprintf("uc8-%d", time.Now().UnixNano())
-	var ochami_tests = []struct {
-		name  string
-		stdin string
-		args  []string
-
-		expected_stdout   string
-		log_stdout        bool
-		skip_stdout_check bool
-		compare_json      bool
-		output_transform  func(string) (string, error)
-	}{
-		{
-			name:              "version",
-			args:              []string{"version"},
-			log_stdout:        true,
-			skip_stdout_check: true,
-		},
-		{
-			name:            "smd group add",
-			args:            []string{"smd", "group", "add", resourceName},
-			expected_stdout: "",
-		},
-		{
-			name:            "smd group add member x0c0s0b0",
-			args:            []string{"smd", "group", "member", "add", resourceName, "x0c0s0b0"},
-			expected_stdout: "",
-		},
-		{
-			name:            "smd group get testing",
-			args:            []string{"smd", "group", "get", "--name", resourceName},
-			expected_stdout: fmt.Sprintf(`[{"description":"","label":%q,"members":{"ids":["x0c0s0b0"]}}]`, resourceName),
-			compare_json:    true,
-		},
-		{
-			name:            "smd group membership testing",
-			args:            []string{"smd", "group", "get", "--name", resourceName},
-			expected_stdout: fmt.Sprintf(`[{"description":"","label":%q,"members":{"ids":["x0c0s0b0"]}}]`, resourceName),
-			compare_json:    true,
-		},
-		{
-			name:            "ochami boot config add",
-			args:            []string{"boot", "config", "add", "-d", "@-", "-f", "json"},
-			expected_stdout: "",
-			stdin: fmt.Sprintf(`{"metadata":{"name":%q},"spec":
-			{
-				"kernel": "http://fake-address/vmlinuz",
-				"initrd": "http://fake-address/initramfs.img",
-				"params": "nomodeset ro root=live:http://fake-address/fake-image",
-				"macs": ["02:00:00:00:00:00"]
-			}}`, resourceName),
-		},
-		{
-			name:            "ochami boot config list",
-			args:            []string{"boot", "config", "list"},
-			expected_stdout: `[{"apiVersion":"v1","kind":"BootConfiguration","metadata":null,"spec":{"initrd":"http://fake-address/initramfs.img","kernel":"http://fake-address/vmlinuz","macs":["02:00:00:00:00:00"],"params":"nomodeset ro root=live:http://fake-address/fake-image"},"status":{}}]`,
-			compare_json:    true,
-			// Gotta remove date metadata from the output
-			output_transform: func(in string) (out string, err error) {
-				var temp []map[string]any
-				err = json.Unmarshal([]byte(in), &temp)
-				if err != nil {
-					return
-				}
-
-				owned := make([]map[string]any, 0, 1)
-				for _, o := range temp {
-					metadata, ok := o["metadata"].(map[string]any)
-					if ok && metadata["name"] == resourceName {
-						o["metadata"] = nil
-						owned = append(owned, o)
-					}
-				}
-
-				out_byte, err := json.Marshal(owned)
-				out = string(out_byte)
-				return
-			},
-		},
-		{
-			name:            "ochami pcs status show x0c0s0b0",
-			args:            []string{"pcs", "status", "show", "x0c0s0b0"},
-			expected_stdout: `{"error":"","lastUpdated":null,"managementState":"available","powerState":"on","supportedPowerTransitions":[],"xname":"x0c0s0b0"}`,
-			compare_json:    true,
-			// Remove lastUpdated timestamp
-			output_transform: func(in string) (out string, err error) {
-				var temp map[string]any
-				err = json.Unmarshal([]byte(in), &temp)
-				if err != nil {
-					return
-				}
-
-				for k := range temp {
-					if k == "lastUpdated" {
-						temp[k] = nil
-					}
-				}
-
-				out_byte, err := json.Marshal(temp)
-				out = string(out_byte)
-				return
-			},
-		},
-	}
-	ctx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
-	defer cancel()
-
 	env, err := LoadImages()
-	if err != nil {
-		t.Errorf("Unable to load image tags: %v", err)
-		return
-	}
-
-	ochami := &ochami_runner{
-		ctx:         ctx,
-		t:           t,
+	require.NoError(t, err, "load image tags")
+	base := ochami_runner{
 		config_path: filepath.Join(t.TempDir(), "config.yaml"),
 		env:         env,
 	}
+	require.NoError(t, base.sync_config(), "write CLI configuration")
 
-	err = ochami.sync_config()
-	if err != nil {
-		t.Errorf("Unable to sync config: %v", err)
-		return
+	// Independent service flows continue even if another flow fails. Each has
+	// its own deadline; discovery cannot consume the SMD or boot command budget.
+	runner := func(t *testing.T, timeout time.Duration) *ochami_runner {
+		t.Helper()
+		ctx, cancel := context.WithTimeout(t.Context(), timeout)
+		t.Cleanup(cancel)
+		r := base
+		r.ctx, r.t = ctx, t
+		return &r
 	}
-
-	err = ochami.gen_access_token()
-	if err != nil {
-		t.Errorf("Unable to get access token: %v", err)
-		return
-	}
-	t.Cleanup(func() {
-		// Cleanup must still run after the command deadline or a failed subtest.
-		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cleanupCancel()
-		if err := cleanupUC8Resources(cleanupCtx, resourceName, ochami.access_token); err != nil {
-			t.Errorf("clean up CLI resources: %v", err)
+	cleanupRegistered := false
+	prepareToken := func(child *testing.T, r *ochami_runner) {
+		child.Helper()
+		require.NoError(child, r.gen_access_token(), "mint access token")
+		if !cleanupRegistered {
+			cleanupRegistered = true
+			token := r.access_token
+			t.Cleanup(func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				defer cancel()
+				if err := cleanupUC8Resources(ctx, resourceName, token); err != nil {
+					t.Errorf("clean up CLI resources: %v", err)
+				}
+			})
 		}
+	}
+
+	t.Run("version", func(t *testing.T) {
+		r := runner(t, 30*time.Second)
+		out := uc8Command(t, r, "", "version")
+		require.NoError(t, validateUC8Version(out), "version output: %s", out)
+		t.Log(out)
 	})
+	t.Run("smd_group_membership", func(t *testing.T) {
+		r := runner(t, time.Minute)
+		prepareToken(t, r)
+		require.Empty(t, uc8Command(t, r, "", "smd", "group", "add", resourceName))
+		require.Empty(t, uc8Command(t, r, "", "smd", "group", "member", "add", resourceName, "x0c0s0b0"))
+		out := uc8Command(t, r, "", "smd", "group", "get", "--name", resourceName)
+		require.JSONEq(t, fmt.Sprintf(`[{"description":"","label":%q,"members":{"ids":["x0c0s0b0"]}}]`, resourceName), out)
 
-	die := false
-	for i, test := range ochami_tests {
-		if die == true {
-			t.Errorf("Aborting tests!")
-			return
+		require.Empty(t, uc8Command(t, r, "", "smd", "group", "member", "delete", "--no-confirm", resourceName, "x0c0s0b0"))
+		out = uc8Command(t, r, "", "smd", "group", "get", "--name", resourceName)
+		require.JSONEq(t, fmt.Sprintf(`[{"description":"","label":%q,"members":{"ids":[]}}]`, resourceName), out,
+			"member deletion must be observable in the group GET")
+	})
+	t.Run("boot_configuration", func(t *testing.T) {
+		r := runner(t, time.Minute)
+		prepareToken(t, r)
+		input := fmt.Sprintf(`{"metadata":{"name":%q},"spec":{"kernel":"http://fake-address/vmlinuz","initrd":"http://fake-address/initramfs.img","params":"nomodeset ro root=live:http://fake-address/fake-image","macs":["02:00:00:00:00:00"]}}`, resourceName)
+		require.Empty(t, uc8Command(t, r, input, "boot", "config", "add", "-d", "@-", "-f", "json"))
+		out := uc8Command(t, r, "", "boot", "config", "list")
+		var configs []map[string]any
+		require.NoError(t, json.Unmarshal([]byte(out), &configs))
+		owned := make([]map[string]any, 0, 1)
+		for _, config := range configs {
+			metadata, ok := config["metadata"].(map[string]any)
+			if ok && metadata["name"] == resourceName {
+				require.NotEmpty(t, metadata["uid"], "created configuration must have a UID")
+				config["metadata"] = nil
+				owned = append(owned, config)
+			}
 		}
-		if test.name == "" {
-			t.Errorf("Test #%d is missing a name", i)
-			return
-		}
-		t.Run(test.name, func(t *testing.T) {
-			stdout, stderr, err := ochami.run(test.stdin, test.args)
-			status, ok := err.(*exec.ExitError)
-			if ok && status.ExitCode() != 0 {
-				t.Errorf("Process exited with code %d: %s", status.ExitCode(), stderr)
-				die = true
-				return
-			}
-			if err != nil {
-				t.Errorf("Error executing process: %v\n%s", err, stderr)
-				die = true
-				return
-			}
-
-			if test.log_stdout == true {
-				t.Log(stdout)
-			}
-
-			if test.output_transform != nil {
-				stdout, err = test.output_transform(stdout)
-				if err != nil {
-					t.Errorf("Unable to transform output: %v", err)
-					die = true
-					return
-				}
-			}
-
-			if !test.skip_stdout_check {
-				if test.compare_json {
-					if !assert.JSONEqf(t,
-						test.expected_stdout,
-						stdout,
-						"Bad output, expected '%s' and got '%s'\n%s",
-						test.expected_stdout, stdout, stderr,
-					) {
-						die = true
-						return
-					}
-				} else {
-					if !assert.Equalf(t,
-						strings.TrimSpace(test.expected_stdout),
-						strings.TrimSpace(stdout),
-						"Bad output, expected '%s' and got '%s'\n%s",
-						test.expected_stdout, stdout, stderr,
-					) {
-						die = true
-						return
-					}
-				}
-			}
-		})
-	}
+		actual, err := json.Marshal(owned)
+		require.NoError(t, err)
+		require.JSONEq(t, `[{"apiVersion":"v1","kind":"BootConfiguration","metadata":null,"spec":{"initrd":"http://fake-address/initramfs.img","kernel":"http://fake-address/vmlinuz","macs":["02:00:00:00:00:00"],"params":"nomodeset ro root=live:http://fake-address/fake-image"},"status":{}}]`, string(actual))
+	})
+	t.Run("pcs_status", func(t *testing.T) {
+		r := runner(t, 3*time.Minute)
+		prepareToken(t, r)
+		ensureBMCDiscovered(r.ctx, t, Endpoints["smd"], "x0c0s0b0", env)
+		require.NoError(t, waitUC8PCSReady(r.ctx, "x0c0s0b0"))
+		out := uc8Command(t, r, "", "pcs", "status", "show", "x0c0s0b0")
+		var status uc8PowerStatus
+		require.NoError(t, json.Unmarshal([]byte(out), &status))
+		require.NoError(t, status.ready("x0c0s0b0"), "CLI status: %s", out)
+	})
 }

@@ -321,8 +321,8 @@ jobs:
             timeout: 20
             go_timeout: 10m
             test_re: '^TestUC8_'
-            services: "ochami CLI, tokensmith, SMD, boot-service, power-control"
-            assertions: "Run the CLI binary against live services; verify SMD group membership, boot configuration round-trip, and power status; clean up owned records."
+            services: "ochami CLI, tokensmith, SMD, boot-service, power-control, magellan, sushy-tools"
+            assertions: "Validate CLI version output; add/read/remove SMD membership; round-trip a boot configuration; discover BMC inventory and wait for PCS readiness before reading status; clean up owned records."
             doc: uc8-ochami-cli.md
     steps:
       - name: Checkout
