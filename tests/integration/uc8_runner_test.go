@@ -41,6 +41,27 @@ type CLIInput struct {
 
 var uc8Invocation atomic.Uint64
 
+// Older CLI releases use envelope payloads by default; newer releases require
+// --envelope. Select the same API intentionally using the advertised capability,
+// without guessing from image tags or weakening resource assertions.
+func (r *ochami_runner) envelopeArgs(args []string) ([]string, error) {
+	if len(args) == 0 || args[0] != "boot" {
+		return args, nil
+	}
+	if !r.bootModeChecked {
+		result := r.execute(CLIInput{IgnoreConfig: true}, "boot", "--help")
+		if result.Err != nil {
+			return nil, fmt.Errorf("inspect boot API mode: %w: %s", result.Err, result.Stderr)
+		}
+		r.bootEnvelope = strings.Contains(result.Stdout, "--envelope")
+		r.bootModeChecked = true
+	}
+	if r.bootEnvelope {
+		return append([]string{"boot", "--envelope"}, args[1:]...), nil
+	}
+	return args, nil
+}
+
 func (r *ochami_runner) execute(input CLIInput, args ...string) CLIResult {
 	result := CLIResult{ExitCode: -1, ContainerName: fmt.Sprintf("uc8-cli-%d-%d-%d", os.Getpid(), time.Now().UnixNano(), uc8Invocation.Add(1))}
 	composeArgs := []string{"compose", "-f", "../../compose/infra.yaml", "-f", "../../compose/bmc-sim.yaml", "-f", "../../compose/core.yaml"}

@@ -7,6 +7,7 @@ package integration
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +15,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -137,4 +139,46 @@ func TestUC8_RunnerResult(t *testing.T) {
 		require.ErrorContains(t, result.Err, "invalid fixture mount")
 		require.Equal(t, -1, result.ExitCode)
 	})
+}
+
+func TestUC8_InputFiles(t *testing.T) {
+	for _, format := range []string{"json", "yaml"} {
+		t.Run(format, func(t *testing.T) {
+			var mu sync.Mutex
+			var observed map[string]any
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				if req.Method != http.MethodPost || req.URL.Path != "/bootconfigurations" {
+					w.WriteHeader(404)
+					return
+				}
+				var data map[string]any
+				if err := json.NewDecoder(req.Body).Decode(&data); err != nil {
+					t.Errorf("decode request: %v", err)
+					w.WriteHeader(400)
+					return
+				}
+				mu.Lock()
+				observed = data
+				mu.Unlock()
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(201)
+				if _, err := fmt.Fprint(w, `{"apiVersion":"v1","kind":"BootConfiguration","metadata":{"name":"uc8-input","uid":"uc8-id"},"spec":{"kernel":"http://fake-address/vmlinuz","params":"uc8-file"},"status":{}}`); err != nil {
+					t.Errorf("write resource: %v", err)
+				}
+			}))
+			defer server.Close()
+			path := uc8PayloadFile(t, "input."+format, map[string]any{"metadata": map[string]string{"name": "uc8-input"}, "spec": map[string]string{"kernel": "http://fake-address/vmlinuz", "params": "uc8-file"}}, format)
+			r := uc8ContractRunner(t)
+			args, err := r.envelopeArgs([]string{"boot", "--uri", uc8FixtureURL(server.URL), "--api-version", "v1", "--no-token", "config", "add", "-d", "@/fixtures/input", "-f", format})
+			require.NoError(t, err)
+			result := r.execute(CLIInput{IgnoreConfig: true, Files: map[string]string{path: "/fixtures/input"}}, args...)
+			require.NoError(t, result.Err, result.Stderr)
+			require.Zero(t, result.ExitCode)
+			mu.Lock()
+			defer mu.Unlock()
+			require.NotNil(t, observed, "server must receive the actual CLI request")
+			require.Equal(t, "uc8-input", observed["metadata"].(map[string]any)["name"], "actual request: %#v", observed)
+			require.Equal(t, "uc8-file", observed["spec"].(map[string]any)["params"])
+		})
+	}
 }

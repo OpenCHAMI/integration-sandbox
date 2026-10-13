@@ -53,9 +53,11 @@ type ochami_runner struct {
 	ctx context.Context
 	t   *testing.T
 
-	config_path  string
-	access_token string
-	env          map[string]string
+	config_path     string
+	access_token    string
+	env             map[string]string
+	bootModeChecked bool
+	bootEnvelope    bool
 }
 
 func (r *ochami_runner) sync_config() (err error) {
@@ -259,6 +261,8 @@ func waitUC8PCSReady(ctx context.Context, xname string) error {
 
 func uc8Command(t *testing.T, r *ochami_runner, stdin string, args ...string) string {
 	t.Helper()
+	args, modeErr := r.envelopeArgs(args)
+	require.NoError(t, modeErr)
 	stdout, stderr, err := r.run(stdin, args)
 	require.NoErrorf(t, err, "ochami %v failed: %s", args, stderr)
 	return strings.TrimSpace(stdout)
@@ -336,7 +340,7 @@ func TestUC8_Ochami_CLI(t *testing.T) {
 		require.JSONEq(t, `[]`, uc8Command(t, r, "", "smd", "group", "get", "--name", resourceName))
 	})
 	t.Run("boot_configuration", func(t *testing.T) {
-		r := runner(t, time.Minute)
+		r := runner(t, 2*time.Minute)
 		prepareToken(t, r)
 		input := fmt.Sprintf(`{"metadata":{"name":%q},"spec":{"kernel":"http://fake-address/vmlinuz","initrd":"http://fake-address/initramfs.img","params":"nomodeset ro root=live:http://fake-address/fake-image","macs":["02:00:00:00:00:00"]}}`, resourceName)
 		require.Empty(t, uc8Command(t, r, input, "boot", "config", "add", "-d", "@-", "-f", "json"))
@@ -355,6 +359,39 @@ func TestUC8_Ochami_CLI(t *testing.T) {
 		actual, err := json.Marshal(owned)
 		require.NoError(t, err)
 		require.JSONEq(t, `[{"apiVersion":"v1","kind":"BootConfiguration","metadata":null,"spec":{"initrd":"http://fake-address/initramfs.img","kernel":"http://fake-address/vmlinuz","macs":["02:00:00:00:00:00"],"params":"nomodeset ro root=live:http://fake-address/fake-image"},"status":{}}]`, string(actual))
+		uid := uc8ResourceUID(t, r, "config", resourceName)
+		before := uc8Resource(t, uc8Command(t, r, "", "boot", "config", "get", uid, "-F", "json"), "json")
+		for _, format := range []string{"json-pretty", "yaml"} {
+			require.Equal(t, before, uc8Resource(t, uc8Command(t, r, "", "boot", "config", "get", uid, "-F", format), format))
+		}
+		path := uc8PayloadFile(t, "set.yaml", map[string]any{"metadata": before["metadata"], "spec": map[string]any{
+			"kernel": "http://fake-address/vmlinuz", "initrd": "http://fake-address/initramfs.img", "params": "uc8-replaced", "macs": []string{"02:00:00:00:00:00"},
+		}}, "yaml")
+		uc8InputCommand(t, r, CLIInput{Files: map[string]string{path: "/fixtures/set.yaml"}}, "boot", "config", "set", uid, "-d", "@/fixtures/set.yaml", "-f", "yaml")
+		changed := uc8Resource(t, uc8Command(t, r, "", "boot", "config", "get", uid, "-F", "json"), "json")
+		spec, ok := changed["spec"].(map[string]any)
+		require.True(t, ok)
+		require.Equal(t, "uc8-replaced", spec["params"])
+		uc8Command(t, r, "", "boot", "config", "patch", uid, "--patch-method", "rfc7386", "-d", `{"params":"uc8-patched"}`)
+		changed = uc8Resource(t, uc8Command(t, r, "", "boot", "config", "get", uid, "-F", "json"), "json")
+		spec, ok = changed["spec"].(map[string]any)
+		require.True(t, ok)
+		require.Equal(t, "uc8-patched", spec["params"])
+		require.Equal(t, "http://fake-address/vmlinuz", spec["kernel"])
+		require.Equal(t, "http://fake-address/initramfs.img", spec["initrd"])
+		require.Equal(t, []any{"02:00:00:00:00:00"}, spec["macs"])
+		uc8Command(t, r, "", "boot", "config", "delete", "--no-confirm", uid)
+		rejected := r.execute(CLIInput{}, "boot", "config", "get", uid)
+		requireUC8CLIFailure(t, r, rejected)
+		require.Regexp(t, `(?i)(404|not found)`, rejected.Stderr)
+		// The file-input create gets its own UID; fallback cleanup owns both
+		// by the exact name if any prior command failed after its write landed.
+		path = uc8FixtureFile(t, "create.json", input)
+		uc8InputCommand(t, r, CLIInput{Files: map[string]string{path: "/fixtures/create.json"}}, "boot", "config", "add", "-d", "@/fixtures/create.json", "-f", "json")
+		uid = uc8ResourceUID(t, r, "config", resourceName)
+		created := uc8Resource(t, uc8Command(t, r, "", "boot", "config", "get", uid, "-F", "json"), "json")
+		require.Equal(t, before["spec"], created["spec"])
+		uc8Command(t, r, "", "boot", "config", "delete", "--no-confirm", uid)
 	})
 	t.Run("pcs_status", func(t *testing.T) {
 		r := runner(t, 3*time.Minute)
