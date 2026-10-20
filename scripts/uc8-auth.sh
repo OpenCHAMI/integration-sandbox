@@ -51,7 +51,7 @@ if [[ -n "$existing" ]]; then
   exit 1
 fi
 owned=true
-"${compose[@]}" up -d --wait --wait-timeout 90 tokensmith "$target"
+timeout 180 "${compose[@]}" up -d --wait --wait-timeout 90 tokensmith "$target"
 ready=false
 for _attempt in {1..30}; do
   status="$("${compose[@]}" exec -T tokensmith curl -s --max-time 2 -o /dev/null -w '%{http_code}' "http://$target:$port$route" || true)"

@@ -41,7 +41,7 @@ for port in 27777 27778; do
 done
 bash scripts/wait-for-stack.sh core
 owned=true
-"${compose[@]}" up -d --no-deps bss cloud-init
+timeout 180 "${compose[@]}" up -d --no-deps bss cloud-init
 for uri in http://127.0.0.1:27778/boot/v1/service/status http://127.0.0.1:27777/version; do
   ready=false
   for _attempt in {1..30}; do

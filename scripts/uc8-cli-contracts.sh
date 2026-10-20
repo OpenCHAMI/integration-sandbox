@@ -10,6 +10,11 @@ source images/pr162/commits.env
 export SBX_SKIP_PREFLIGHT=1
 finish() {
   rc=$?
+  if (( rc != 0 )); then
+    docker compose -f compose/infra.yaml -f compose/bmc-sim.yaml -f compose/core.yaml ps > "$log_dir/compose-ps.log" 2>&1 || true
+    docker ps -a > "$log_dir/docker-ps.log" 2>&1 || true
+    docker compose -f compose/infra.yaml -f compose/bmc-sim.yaml -f compose/core.yaml logs --tail=200 > "$log_dir/services.log" 2>&1 || true
+  fi
   bash scripts/heartbeat.sh "cli-contracts-$rc" "Real CLI fixture contracts exit $rc; $log_dir"
   exit "$rc"
 }
