@@ -47,3 +47,13 @@ stacks, inspect SMD/PCS side effects, run auth contracts against an enforcing
 service, and run the full suite for interactions with UC5/UC6. Abrupt kills
 can still leave uniquely named records because Go cleanup cannot run. The
 existing stack was preserved; no upstream code was patched here.
+
+## PR162 follow-up
+
+The 2026-10-13 table above is historical. The PR162 changes repair PS256 issuer
+fixtures, add v3/v4 image builds and an explicit authenticated-cluster token
+matrix, add modern metadata and real legacy API lifecycle tests, and extend
+isolated authentication checks to BSS. PostgreSQL/SMD were recovered in place
+on 2026-10-20. Dedicated full-stack and enforcement execution is reported
+separately in [PR162 validation](pr162-validation.md); added assertions alone
+are not evidence that those live flows passed.

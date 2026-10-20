@@ -41,9 +41,9 @@ Everything else (`make build-images`, `make up`, `make seed`, `make test`, `make
 - BMC creds everywhere: `root` / `root_password` (matches both emulator hardcoded defaults).
 - Vault root token: `dev-root-token` (matches operator's `hack/local-dev/seed-vault.sh`).
 - LocalStack S3: `test`/`test`, region `us-east-1`, buckets `boot-images`, `openchami-logs`, `parquet`.
-- Image tag policy: `make ci` defaults to `IMAGES=release` (`images/release.env`,
-  each OpenCHAMI service pinned to its latest GitHub Release tag). Refresh
-  with `make refresh-releases`. Use `IMAGES=default` for floating `:latest`,
+- Image tag policy: `make ci` defaults to `IMAGES=default` (`images/default.env`,
+  the pinned compatibility mix). Use `IMAGES=release` for the release manifest,
+  refreshed with `make refresh-releases`,
   `IMAGES=edge` for `:main` builds, or `SBX_<NAME>_IMAGE=…` to override one
   service. Only build locally if a pull fails.
 
@@ -65,3 +65,21 @@ Everything else (`make build-images`, `make up`, `make seed`, `make test`, `make
    script that owned the matching `up`.
 6. **Pre-approved tools** are listed in `.claude/settings.json`; if you
    need something outside that list (e.g. `git`), ask.
+
+## PR162 validation additions
+- `make build-cli-pair` fetches pinned v3/v4 commits into ignored `.cache/ochami/`;
+  `SBX_OCHAMI_SOURCE` may name a local repository read-only. No sibling edits.
+- `SBX_DEDICATED_RUNNER=1 bash scripts/pr162-ci.sh` owns a fresh validation
+  stack. It refuses existing sandbox containers and occupied core ports.
+- `compose/cli-apis.yaml` adds real BSS and legacy cloud-init on loopback ports
+  27778 and 27777 for host-side independent HTTP assertions. Other traffic stays
+  on the Docker network. Pinned images live in `images/pr162/services.env`.
+- BSS CRUD reserves boot parameters for seeded `x0c0s7b0n0` only after an absence
+  check. UC4 reserves `x1c0s0b0`, refuses collisions, and deletes only its create.
+- `UC8_AUTH_SERVICE=bss make uc8-auth` uses the isolated BSS/tokensmith profile
+  and refuses occupied port 27778. Boot retains port 27791. Never stop the core
+  stack to acquire either port. Signing keys remain in tmpfs.
+- `SBX_SKIP_PREFLIGHT=1` is for fixture-only tests or isolated profiles;
+  dedicated live comparison gates readiness before each attempt.
+- External OIDC and signing-key rotation are not proven by local-user minting
+  or refresh-token rotation. See `docs/pr162-validation.md` for precise limits.

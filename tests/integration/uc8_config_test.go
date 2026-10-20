@@ -89,7 +89,7 @@ func TestUC8_ConfigurationContracts(t *testing.T) {
 				want = "Bearer " + test.token
 			}
 			for _, actual := range headers[start:] {
-				require.Equal(t, want, actual)
+				require.True(t, want == actual, "bearer token forwarding mismatch")
 			}
 		})
 	}

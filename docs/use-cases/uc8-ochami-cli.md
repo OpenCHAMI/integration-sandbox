@@ -46,3 +46,11 @@ The separate profile refuses an occupied port and preserves existing stacks.
 
 See [completeness and validation limits](../uc8-completeness-review.md).
 Live boot CRUD passed twice; full SMD/PCS runs await a healthy stack.
+
+PR162 additions are described in [the validation report](../pr162-validation.md).
+`make uc8-cli-contracts` executes both pinned CLI revisions against HTTP fixtures;
+token validation uses an explicitly authenticated cluster. Modern metadata has
+owned UID lifecycle coverage. `compose/cli-apis.yaml` supplies real BSS and
+legacy cloud-init rather than reusing unrelated service URLs; their live tests
+require `SBX_CLI_APIS_ENABLED=1`. BSS has an isolated enforcement target via
+`UC8_AUTH_SERVICE=bss make uc8-auth`.

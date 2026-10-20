@@ -6,15 +6,25 @@ mkdir -p "$log_dir"
 exec > >(tee "$log_dir/uc8-auth.log") 2>&1
 source scripts/load-images.sh
 export UC8_AUTH_PROJECT="uc8-auth-$$"
-export UC8_AUTH_ENABLED=1 SBX_WAIT_TIMEOUT=1ns
+export UC8_AUTH_ENABLED=1 SBX_SKIP_PREFLIGHT=1
+export UC8_AUTH_SERVICE="${UC8_AUTH_SERVICE:-boot}"
+port=27791
+target=boot-service
+route=/bootconfigurations
+if [[ "$UC8_AUTH_SERVICE" == bss ]]; then
+  port=27778; target=bss; route=/boot/v1/bootparameters
+elif [[ "$UC8_AUTH_SERVICE" != boot ]]; then
+  printf 'Unsupported UC8_AUTH_SERVICE\n' >&2; exit 1
+fi
 compose=(docker compose -p "$UC8_AUTH_PROJECT" -f compose/uc8-auth.yaml)
 # Reuse the documented boot port; refuse to disturb an existing sandbox.
-published="$(docker ps -q --filter publish=27791)"
+published="$(docker ps -q --filter publish="$port")"
 command -v nc >/dev/null
-if [[ -n "$published" ]] || nc -z 127.0.0.1 27791; then
-  printf '%s\n' 'UC8 auth refuses occupied boot port 27791.'
-  printf '%s\n' 'UC8 auth blocked: boot port 27791 is occupied; existing stack unchanged.' >> PROGRESS.log
-  printf '%s\n' 'UC8 auth requires a separate runner or free boot port.' >> STATUS
+if [[ -n "$published" ]] || nc -z 127.0.0.1 "$port"; then
+  printf 'UC8 auth refuses occupied port %s.\n' "$port"
+  printf '%s\n' "UC8 auth blocked: port $port occupied; existing stack unchanged." >> PROGRESS.log
+  printf 'UC8 auth requires a separate runner or free port %s.\n' "$port" > STATUS
+  printf 'UC8 auth blocked: port %s occupied; existing stack preserved.\n' "$port" > BLOCKED.md
   exit 1
 fi
 owned=false
@@ -27,7 +37,7 @@ finish() {
     if ! "${compose[@]}" down --remove-orphans; then result=1; fi
   fi
   if [[ "$result" != 0 ]]; then
-    printf 'UC8 auth failed. Inspect %s. Boot v0.3.2 configures JWKS but does not wire inbound authentication middleware; readiness failures may also prevent execution.\n' "$log_dir" > BLOCKED.md
+    printf 'UC8 %s authentication failed. Inspect %s for readiness/contract cause. Boot v0.3.2 lacks inbound enforcement; never classify failed fixture construction as service rejection.\n' "$UC8_AUTH_SERVICE" "$log_dir" > BLOCKED.md
   fi
   printf 'UC8 auth completed with status %s; logs %s\n' "$result" "$log_dir" >> PROGRESS.log
   printf 'UC8 auth status %s\n' "$result" >> STATUS
@@ -41,15 +51,15 @@ if [[ -n "$existing" ]]; then
   exit 1
 fi
 owned=true
-"${compose[@]}" up -d --wait --wait-timeout 90
+"${compose[@]}" up -d --wait --wait-timeout 90 tokensmith "$target"
 ready=false
-for attempt in {1..30}; do
-  status="$("${compose[@]}" exec -T tokensmith curl -s --max-time 2 -o /dev/null -w '%{http_code}' http://boot-service:27791/bootconfigurations || true)"
+for _attempt in {1..30}; do
+  status="$("${compose[@]}" exec -T tokensmith curl -s --max-time 2 -o /dev/null -w '%{http_code}' "http://$target:$port$route" || true)"
   case "$status" in 200|401|403) ready=true; break ;; esac
   sleep 1
 done
 if [[ "$ready" != true ]]; then
-  printf '%s\n' 'Boot authentication stack did not become reachable.'
+  printf 'Authentication target %s did not become reachable.\n' "$target"
   exit 1
 fi
 cd tests

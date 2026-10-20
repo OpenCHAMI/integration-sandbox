@@ -80,3 +80,18 @@ See [extending.md](extending.md) — the process is "drop a file, add to `make s
 - **Secrets that aren't sandbox-only.** Every credential here is published in the docs; if it has to stay private, it doesn't belong in this directory.
 - **Large binaries.** Anything over a few KB belongs in `s3-buckets.sh` (uploaded to localstack) or in the relevant service's own test data.
 - **Live SQL data.** Use a script that POSTs through the service's API. The harness avoids reaching directly into postgres on principle.
+
+## PR162 owned fixtures
+
+- `x1c0s0b0` is UC4's reserved bootstrap/exchange/refresh component. UC4 refuses
+  an existing record and deletes only after its own creation attempt, using a
+  fresh cleanup deadline. It never pre-deletes a collision.
+- BSS parameter CRUD uses existing seeded node `x0c0s7b0n0` after checking for
+  absent BSS parameters. No new node or power operation is introduced.
+- Modern metadata defaults/group/instance/peer objects and legacy cloud-init
+  groups use unique names. Modern cleanup resolves only those names to UIDs.
+- PS256 authentication fixtures retain the real issuer key ID. Expired tokens
+  must pass issuer-signature verification with claims checking disabled and
+  fail normal time validation beyond the two-minute test skew. Wrong-key tokens
+  must fail signature verification. Signing keys live only in tmpfs/process
+  memory, and tokens never appear in diagnostics.

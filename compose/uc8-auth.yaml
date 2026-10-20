@@ -25,3 +25,16 @@ services:
     depends_on:
       tokensmith:
         condition: service_healthy
+  bss:
+    image: ${SBX_BSS_IMAGE:-ghcr.io/openchami/bss@sha256:6bac4096dbe294b99f687f6ee570b0bb9279e58be362a91d088f0b23c3eda10c}
+    profiles: [bss-auth]
+    environment:
+      BSS_HTTP_LISTEN: ":27778"
+      BSS_JWKS_URL: http://tokensmith:27780/.well-known/jwks.json
+      BSS_INSECURE: "true"
+      BSS_USESQL: "false"
+      DATASTORE_BASE: "mem:"
+    ports: ["127.0.0.1:27778:27778"]
+    depends_on:
+      tokensmith:
+        condition: service_healthy

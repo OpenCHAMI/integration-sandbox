@@ -136,3 +136,27 @@ These URLs are docker-network-only:
 - `udp://x0c0s0b0-ipmi:623` — IPMI sim.
 - `postgres://postgres:5432/…` — service-to-postgres.
 - `http://vault:8200`, `http://localstack:4566` — service views of the same instances the host can reach via 127.0.0.1.
+
+## PR162 real legacy profiles
+
+These endpoints belong to `compose/cli-apis.yaml`, never aliases of modern boot
+or metadata. Images are pinned by digest in `images/pr162/services.env`.
+
+| API | Loopback base | Protected/read/write surfaces |
+|---|---|---|
+| BSS | `http://127.0.0.1:27778/boot/v1` | `/bootparameters` CRUD; `/service/status`; `/bootscript` |
+| Legacy cloud-init | `http://127.0.0.1:27777` | `/admin/groups`, `/admin/impersonation/{xname}/{meta-data,user-data,vendor-data}` |
+
+Modern metadata lifecycle tests use `/clusterdefaultss`, `/groups`,
+`/instanceinfos`, and `/wireguardpeers`, with name discovery followed by UID
+operations. Its configuration key is `metadata-service`.
+
+The BSS fixture checks absence of parameters for existing `x0c0s7b0n0` and
+cleans up only those parameters. It does not change SMD or issue power actions.
+UC4 checks absence of reserved `x1c0s0b0` and preserves any pre-existing record.
+
+`UC8_AUTH_SERVICE=bss make uc8-auth` owns isolated BSS/tokensmith containers,
+publishes only loopback 27778, and refuses an occupied port. BSS enforces
+signature/time checks and presence of sub/iss/aud on `/bootparameters` when
+JWKS is configured. Issuer/audience value and scope enforcement are not claimed.
+Boot and legacy cloud-init enforcement gaps remain recorded separately.

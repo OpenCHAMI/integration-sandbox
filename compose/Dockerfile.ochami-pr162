@@ -1,0 +1,20 @@
+# Copyright © 2026 OpenCHAMI a Series of LF Projects, LLC
+# SPDX-License-Identifier: MIT
+# Keep source untouched; avoid the upstream runtime's package installation.
+FROM golang:1.27.2@sha256:820153096fda4de6ac1b7194d12e416b7dd8f4e9a33d17e0345b111b945162d8 AS builder
+ARG SOURCE_COMMIT
+ENV CGO_ENABLED=0
+WORKDIR /ochami
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN make VERSION=pr162 TAG=pr162 BRANCH=detached BUILD="$SOURCE_COMMIT" GITSTATE=clean
+RUN mkdir -p /home/ochami/.config
+
+FROM scratch
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+COPY --from=builder /home/ochami /home/ochami
+COPY --from=builder /ochami/ochami /bin/ochami
+ENV HOME=/home/ochami PATH=/bin
+USER 65534:65534
+ENTRYPOINT ["/bin/ochami"]

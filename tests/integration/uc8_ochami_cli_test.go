@@ -39,9 +39,12 @@ clusters:
         smd:
           uri: {{ .smd }}/hsm/v2
         bss:
-          uri: {{ .boot }}
+          uri: {{ .bss }}
         cloud-init:
+          uri: {{ .cloudinit }}
+        metadata-service:
           uri: {{ .metadata }}
+          api-version: v1
         pcs:
           uri: {{ .power }}
         boot-service:
@@ -84,6 +87,8 @@ func (r *ochami_runner) sync_config() (err error) {
 	for name, uri := range Endpoints {
 		containerEndpoints[name] = uc8FixtureURL(uri)
 	}
+	containerEndpoints["bss"] = uc8FixtureURL(envOr("SBX_BSS_URL", "http://127.0.0.1:27778/boot/v1"))
+	containerEndpoints["cloudinit"] = uc8FixtureURL(envOr("SBX_CLOUD_INIT_URL", "http://127.0.0.1:27777"))
 	err = tmpl.Execute(f, containerEndpoints)
 	if err != nil {
 		return fmt.Errorf("config template execution error: %w", err)

@@ -1,0 +1,40 @@
+# SPDX-FileCopyrightText: Copyright © 2026 OpenCHAMI a Series of LF Projects, LLC
+# SPDX-License-Identifier: MIT
+name: PR162 CLI validation
+on:
+  workflow_dispatch:
+    inputs:
+      enforcing_boot_image:
+        description: "Immutable boot image with inbound JWT enforcement (empty reports blocked)"
+        type: string
+        default: ""
+permissions:
+  contents: read
+  packages: read
+jobs:
+  comparison:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      SBX_DEDICATED_RUNNER: "1"
+      SBX_ENFORCING_BOOT_IMAGE: ${{ inputs.enforcing_boot_image }}
+      VAULT_ADDR: http://127.0.0.1:8200
+      VAULT_TOKEN: dev-root-token
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v7.0.0
+        with:
+          go-version-file: tests/go.mod
+          cache-dependency-path: tests/go.sum
+      - uses: ./.github/actions/setup-tools
+      - name: Build pinned inputs and validate on owned stacks
+        run: bash scripts/pr162-ci.sh
+      - name: Upload sanitized diagnostics and identities
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: pr162-validation-${{ github.run_id }}
+          path: logs/
+          retention-days: 30

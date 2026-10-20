@@ -10,7 +10,7 @@ The compose stack reads every image tag from a `SBX_<NAME>_IMAGE` environment va
 
 | File | Intent |
 |---|---|
-| `images/default.env` | Pinned-known-good (today: smd 2.17, everything else `:latest`). What `make ci` uses without args. |
+| `images/default.env` | Pinned compatibility mix; includes immutable PR169 CLI. What `make ci` uses without args. |
 | `images/edge.env` | OpenCHAMI services track `:main`; smd tracks `:latest`. Run nightly to detect upstream breakage. |
 | `images/release-v1.0.env` | Template; replace `:v1.0.0` placeholders with real tags when the v1.0 train cuts. |
 
@@ -142,3 +142,33 @@ These match the published emulator defaults — do not change without updating b
 The corresponding BMCs are aliased on the docker network as `x0c0s{N}b0` so `https://x0c0s5b0/redfish/v1` resolves from inside any service container.
 
 UC1 owns `x0c0s0..3`, UC2 owns `x0c0s4..7`, UC3 owns `x9c0s*` (out-of-fleet), so the use cases never collide.
+
+## PR162 CLI and legacy API inputs
+
+`make build-cli-pair` builds the full commit hashes in `images/pr162/commits.env`.
+Set `SBX_OCHAMI_SOURCE` to a repository URL or local checkout to read commits
+without modifying that checkout. Build contexts stay under ignored `.cache/`.
+Resulting local image IDs and runtime commit fields are recorded in UTC logs;
+local builds have image IDs rather than published registry digests.
+
+`SBX_OCHAMI_IMAGE` selects the CLI used by all existing runners and workflow
+inputs. `SBX_CLI_JWX_MAJOR=3` declares the pinned baseline's intentional
+acceptance of duplicate claims; v4 must reject them. Do not use this switch
+to relax other failures.
+
+| Variable | Purpose/default |
+|---|---|
+| `SBX_BSS_IMAGE` | Immutable BSS v1.32.3 identity in `images/pr162/services.env` |
+| `SBX_CLOUD_INIT_IMAGE` | Immutable legacy cloud-init v1.4.12 identity in that file |
+| `SBX_BSS_URL` | `http://127.0.0.1:27778/boot/v1` |
+| `SBX_CLOUD_INIT_URL` | `http://127.0.0.1:27777` |
+| `SBX_CLI_APIS_ENABLED` | `1` requires real legacy APIs; otherwise live legacy tests skip |
+| `SBX_DEDICATED_RUNNER` | `1` acknowledges a dedicated stack for PR162 comparison |
+| `SBX_ENFORCING_BOOT_IMAGE` | Immutable enforcing boot image for full validation; no default |
+| `UC8_AUTH_SERVICE` | `boot` (27791) or `bss` (27778) |
+| `SBX_SKIP_PREFLIGHT` | `1` bypasses package-level reachability sweep for focused fixture tests |
+
+The two additional ports bind only to loopback and support host-side independent
+HTTP assertions. BSS uses in-memory storage, real SMD, and explicitly disables
+SQL. Legacy cloud-init uses in-memory storage, real SMD, and impersonation.
+Neither introduces credentials or additional fake nodes.

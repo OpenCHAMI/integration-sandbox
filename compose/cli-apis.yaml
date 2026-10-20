@@ -1,0 +1,30 @@
+# Real legacy APIs; combine with infra/bmc-sim/core on a dedicated runner.
+services:
+  bss:
+    image: ${SBX_BSS_IMAGE:?set an immutable BSS image}
+    profiles: [cli-apis]
+    environment:
+      HSM_URL: http://smd:27779
+      BSS_HTTP_LISTEN: ":27778"
+      BSS_INSECURE: "true"
+      BSS_USESQL: "false"
+      DATASTORE_BASE: "mem:"
+    ports: ["127.0.0.1:27778:27778"]
+    depends_on:
+      smd:
+        condition: service_healthy
+  cloud-init:
+    image: ${SBX_CLOUD_INIT_IMAGE:?set an immutable legacy cloud-init image}
+    profiles: [cli-apis]
+    environment:
+      LISTEN: "0.0.0.0:27777"
+      SMD_URL: http://smd:27779
+      CLUSTER_NAME: sandbox
+      BASE_URL: http://cloud-init:27777
+      IMPERSONATION: "true"
+      STORAGE_BACKEND: mem
+    tmpfs: ["/data:mode=1777"]
+    ports: ["127.0.0.1:27777:27777"]
+    depends_on:
+      smd:
+        condition: service_healthy

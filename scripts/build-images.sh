@@ -8,6 +8,10 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WORKSPACE="$(cd "$ROOT/.." && pwd)"
 cd "$ROOT"
 
+log_dir="logs/$(date -u +%Y%m%dT%H%M%SZ)/build-images"
+mkdir -p "$log_dir"
+exec > >(tee "$log_dir/build-images.log") 2>&1
+
 # shellcheck disable=SC1091
 source "$ROOT/scripts/load-images.sh"
 
@@ -31,6 +35,10 @@ PULL_LIST=(
 
 declare -a MISSING=()
 for img in "${PULL_LIST[@]}"; do
+  if [[ "$img" == openchami/ochami-sandbox:* ]] && docker image inspect "$img" >/dev/null 2>&1; then
+    printf '[local] %s\n' "$img"
+    continue
+  fi
   printf '[pull] %s\n' "$img"
   if ! timeout 120 docker pull --quiet "$img" >/dev/null 2>&1; then
     printf '[pull] WARN: %s did not pull\n' "$img"

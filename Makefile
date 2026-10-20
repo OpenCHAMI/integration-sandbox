@@ -34,7 +34,7 @@ show-images: ## Print the resolved image set for the current IMAGES + overrides
 	  for v in SBX_VAULT_IMAGE SBX_LOCALSTACK_IMAGE SBX_POSTGRES_IMAGE \
 	           SBX_SUSHY_IMAGE SBX_IPMI_SIM_IMAGE \
 	           SBX_SMD_IMAGE SBX_TOKENSMITH_IMAGE SBX_BOOT_IMAGE \
-	           SBX_METADATA_IMAGE SBX_FRU_IMAGE SBX_POWER_IMAGE SBX_MAGELLAN_IMAGE; do \
+           SBX_METADATA_IMAGE SBX_FRU_IMAGE SBX_POWER_IMAGE SBX_MAGELLAN_IMAGE SBX_OCHAMI_IMAGE; do \
 	    printf "  %-22s %s\n" "$$v" "$${!v}"; \
 	  done'
 
@@ -76,6 +76,18 @@ uc8: ## UC8 — Ochami CLI against live SMD, boot-service, and power-control
 
 uc8-auth: ## UC8 — isolated boot authentication contracts (requires free port 27791)
 	@bash scripts/uc8-auth.sh
+
+build-cli-pair: ## Build pinned PR162 baseline and migrated CLI images inside the sandbox
+	@bash scripts/build-cli-pair.sh
+
+uc8-cli-contracts: ## Run both pinned CLIs against HTTP fixtures; no live service mutations
+	@bash scripts/uc8-cli-contracts.sh
+
+uc8-pr162: ## Compare pinned CLI images twice against the same healthy dedicated stack
+	@bash scripts/uc8-pr162.sh
+
+uc8-cli-apis: ## Run real BSS/legacy cloud-init CLI lifecycles on a dedicated stack
+	@bash scripts/uc8-cli-apis.sh
 
 test-bats: ## Run the bats CLI smoke suite against the running stack
 	@bats tests/bats/

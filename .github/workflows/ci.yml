@@ -100,6 +100,10 @@ on:
         description: "Override magellan-runner image"
         type: string
         default: ""
+      sbx_ochami_image:
+        description: "Override the actual CLI image"
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -120,6 +124,7 @@ env:
   SBX_FRU_IMAGE: ${{ inputs.sbx_fru_image }}
   SBX_POWER_IMAGE: ${{ inputs.sbx_power_image }}
   SBX_MAGELLAN_IMAGE: ${{ inputs.sbx_magellan_image }}
+  SBX_OCHAMI_IMAGE: ${{ inputs.sbx_ochami_image }}
 
 jobs:
   # ──────────────────────────────────────────────────────────────────────────

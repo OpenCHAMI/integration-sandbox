@@ -57,6 +57,9 @@ var httpClient = &http.Client{
 
 // TestMain runs once before any test in the package; ensures every endpoint is reachable.
 func TestMain(m *testing.M) {
+	if os.Getenv("SBX_SKIP_PREFLIGHT") == "1" {
+		os.Exit(m.Run())
+	}
 	// quick liveness sweep — keep diagnostic so a CI failure here is informative.
 	timeout := 30 * time.Second
 	if v := os.Getenv("SBX_WAIT_TIMEOUT"); v != "" {

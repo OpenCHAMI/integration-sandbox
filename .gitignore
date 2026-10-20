@@ -28,3 +28,6 @@ tests/go.sum.bak
 
 # Local act secrets — never commit; .secrets.example is the template.
 .secrets
+
+# Sandbox-owned upstream source/build contexts.
+.cache/

@@ -92,3 +92,49 @@ make test-integration
 # Generate a forensic bundle without failing anything
 bash scripts/log-bundle.sh debug-$(date +%s)
 ```
+
+## PR162 validation
+
+Use `make build-cli-pair` to build the pinned v3/v4 inputs. The default uses
+`compose/Dockerfile.ochami-pr162`: pinned Go builder, upstream `make`, and a
+static runtime without runtime package installation. It injects the full source
+commit explicitly and checks `ochami version` after packaging.
+
+When registry downloads are unavailable, an explicit host toolchain can build
+both Linux binaries with the same upstream Makefile:
+
+```bash
+SBX_OCHAMI_SOURCE=/path/to/read-only/ochami-checkout \
+SBX_OCHAMI_BUILD_MODE=host SBX_OCHAMI_GO_TOOLCHAIN=go1.27.3 make build-cli-pair
+make uc8-cli-contracts
+```
+
+Host mode's minimal runtime is intended for this HTTP sandbox. Use the default
+builder/runtime with system CA certificates for deployments requiring HTTPS.
+The contract target uses in-process HTTP fixtures and never mutates live
+services. It records the intentional v3/v4 duplicate-claim difference.
+
+On a **dedicated runner with no existing sandbox containers**:
+
+```bash
+SBX_DEDICATED_RUNNER=1 \
+SBX_ENFORCING_BOOT_IMAGE=registry/boot@sha256:... bash scripts/pr162-ci.sh
+```
+
+The script owns stack creation and teardown, seeds once, runs both CLIs twice
+against unchanged service inputs, exercises real legacy APIs and modern
+metadata, and runs UC5/UC6 interactions. It then runs isolated BSS authentication
+contracts and boot contracts when an immutable enforcing boot image is supplied.
+An absent enforcing boot image produces an explicit blocked/nonzero result.
+It refuses an existing project or occupied core ports. No existing local stack
+is stopped or adopted. A readiness failure stops dependent service tests.
+
+The manually dispatched **PR162 CLI validation** workflow provides this dedicated
+runner. Its pinned commits must be fetchable upstream; locally committed source
+can be built using `SBX_OCHAMI_SOURCE` without publishing it automatically.
+
+For slices on an already healthy dedicated stack, use `make uc8-cli-apis` or
+`SBX_DEDICATED_RUNNER=1 make uc8-pr162`. The latter neither seeds nor tears down
+services, checks running images against the selected manifest before each
+attempt, and rejects drift. Legacy APIs are optional for the ordinary UC8 suite;
+`SBX_CLI_APIS_ENABLED=1` makes their live assertions mandatory.

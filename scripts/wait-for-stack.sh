@@ -28,9 +28,22 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
+log_dir="logs/$(date -u +%Y%m%dT%H%M%SZ)/wait-for-stack"
+mkdir -p "$log_dir"
+exec > >(tee "$log_dir/wait-for-stack.log") 2>&1
+
 PER_TIMEOUT_S="${WAIT_PER_TIMEOUT_S:-${WAIT_TIMEOUT_S:-120}}"
 INTERVAL_S="${WAIT_INTERVAL_S:-3}"
 SUBSET="${1:-all}"
+
+if [[ "$SUBSET" == infra || "$SUBSET" == all ]]; then
+  if ! timeout "$PER_TIMEOUT_S" bash -c 'until docker exec sandbox-postgres pg_isready -U openchami -d smd >/dev/null 2>&1; do sleep 2; done'; then
+    bash scripts/log-bundle.sh postgres-timeout >/dev/null
+    printf 'PostgreSQL did not become ready; inspect logs; dependent tests stopped.\n' > BLOCKED.md
+    bash scripts/heartbeat.sh postgres-blocked "PostgreSQL readiness timeout"
+    exit 1
+  fi
+fi
 
 INFRA_ENDPOINTS=(
   "vault|http://127.0.0.1:8200/v1/sys/health"
@@ -39,7 +52,7 @@ INFRA_ENDPOINTS=(
 
 CORE_ENDPOINTS=(
   "smd|http://127.0.0.1:27779/hsm/v2/service/ready"
-  "tokensmith|http://127.0.0.1:27780/health"
+  "tokensmith|http://127.0.0.1:27780/.well-known/jwks.json"
   "boot-service|http://127.0.0.1:27791/health"
   "metadata-service|http://127.0.0.1:27792/health"
   "fru-tracker|http://127.0.0.1:27793/health"
@@ -88,5 +101,7 @@ done
 
 if (( fail )); then
   bash "$ROOT/scripts/log-bundle.sh" wait-timeout >/dev/null
+  printf 'Service readiness timeout; inspect logs; dependent tests stopped.\n' > BLOCKED.md
+  bash scripts/heartbeat.sh readiness-blocked "Service readiness timeout"
   exit 1
 fi

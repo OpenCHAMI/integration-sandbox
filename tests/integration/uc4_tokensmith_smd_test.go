@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"net/url"
 	"os/exec"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -89,18 +90,19 @@ func TestUC4_Tokensmith_SMD(t *testing.T) {
 	body := readAll(t, resp)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("token exchange: HTTP %d, body=%s", resp.StatusCode, body)
+		t.Fatalf("token exchange: HTTP %d", resp.StatusCode)
 	}
 	var exchange struct {
-		AccessToken string `json:"access_token"`
-		TokenType   string `json:"token_type"`
-		ExpiresIn   int    `json:"expires_in"`
+		AccessToken  string `json:"access_token"`
+		TokenType    string `json:"token_type"`
+		ExpiresIn    int    `json:"expires_in"`
+		RefreshToken string `json:"refresh_token"`
 	}
 	if err := json.Unmarshal([]byte(body), &exchange); err != nil {
-		t.Fatalf("decode token response: %v body=%s", err, body)
+		t.Fatalf("decode token response: %v", err)
 	}
 	if exchange.AccessToken == "" {
-		t.Fatalf("token exchange returned empty access_token, body=%s", body)
+		t.Fatal("token exchange returned empty access_token")
 	}
 	if !strings.EqualFold(exchange.TokenType, "Bearer") {
 		t.Errorf("expected token_type=Bearer, got %q", exchange.TokenType)
@@ -126,6 +128,66 @@ func TestUC4_Tokensmith_SMD(t *testing.T) {
 	}
 	if !parsed.Valid {
 		t.Fatalf("JWT failed JWKS verification (parsed.Valid=false)")
+	}
+
+	// Real refresh-token rotation is distinct from signing-key rotation.
+	if exchange.RefreshToken == "" {
+		t.Fatal("issuer returned no refresh token")
+	}
+	refreshForm := url.Values{"grant_type": {"refresh_token"}, "refresh_token": {exchange.RefreshToken}}
+	refreshReq, err := http.NewRequestWithContext(ctx, http.MethodPost, tokensmithURL+"/oauth/token", strings.NewReader(refreshForm.Encode()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	refreshReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	refreshResp, err := httpClient.Do(refreshReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var refreshed struct {
+		AccessToken  string `json:"access_token"`
+		RefreshToken string `json:"refresh_token"`
+	}
+	err = json.NewDecoder(refreshResp.Body).Decode(&refreshed)
+	refreshResp.Body.Close()
+	if refreshResp.StatusCode != http.StatusOK || err != nil {
+		t.Fatalf("refresh failed: HTTP %d, decode error %v", refreshResp.StatusCode, err)
+	}
+	if refreshed.RefreshToken == "" || refreshed.RefreshToken == exchange.RefreshToken {
+		t.Fatal("refresh token did not rotate")
+	}
+	refreshedJWT, err := jwt.Parse(refreshed.AccessToken, keyfunc, jwt.WithValidMethods([]string{"PS256"}), jwt.WithLeeway(30*time.Second))
+	if err != nil {
+		t.Fatalf("verify refreshed access token against JWKS: %v", err)
+	}
+	refreshClaims := refreshedJWT.Claims.(jwt.MapClaims)
+	if !reflect.DeepEqual(refreshClaims["scope"], parsed.Claims.(jwt.MapClaims)["scope"]) {
+		t.Fatal("refresh changed authorized scopes")
+	}
+	if !claimContainsString(refreshClaims, "aud", "smd") {
+		t.Fatal("refresh changed audience")
+	}
+	for _, scope := range policy.Scopes {
+		if !claimContainsString(refreshClaims, "scope", scope) {
+			t.Fatal("refresh lost authorized scope")
+		}
+	}
+	if refreshClaims["iss"] != "http://tokensmith:27780" || refreshClaims["sub"] != policy.Subject {
+		t.Fatal("refresh changed issuer/subject")
+	}
+	// The bootstrap credential is one-shot. Its replay must fail independently.
+	replay, err := http.NewRequestWithContext(ctx, http.MethodPost, tokensmithURL+"/oauth/token", strings.NewReader(form.Encode()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	replay.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	replayResp, err := httpClient.Do(replay)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replayResp.Body.Close()
+	if replayResp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("bootstrap replay HTTP %d", replayResp.StatusCode)
 	}
 
 	// Step 4: claim assertions.
@@ -159,17 +221,41 @@ func TestUC4_Tokensmith_SMD(t *testing.T) {
 	// This guarantees the GET-after-POST is observing a state change
 	// produced by THIS test, not the seed.
 	xname := "x1c0s0b0"
-	smdReset := func() {
-		// Best-effort cleanup so re-running the test is idempotent.
-		// SMD returns 404 on missing component — that's fine.
-		req, _ := http.NewRequestWithContext(ctx, http.MethodDelete,
-			smdURL+"/hsm/v2/State/Components/"+xname, nil)
-		if r, err := httpClient.Do(req); err == nil {
-			r.Body.Close()
-		}
+	// A reserved identifier is not ownership: never delete a pre-existing record.
+	check, err := http.NewRequestWithContext(ctx, http.MethodGet, smdURL+"/hsm/v2/State/Components/"+xname, nil)
+	if err != nil {
+		t.Fatal(err)
 	}
-	smdReset()
-	t.Cleanup(smdReset)
+	existing, err := httpClient.Do(check)
+	if err != nil {
+		t.Fatal(err)
+	}
+	existing.Body.Close()
+	if existing.StatusCode != http.StatusNotFound {
+		t.Fatalf("UC4 fixture collision/read failure: HTTP %d; preserving existing record", existing.StatusCode)
+	}
+	owned := false
+	t.Cleanup(func() {
+		if !owned {
+			return
+		}
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		req, err := http.NewRequestWithContext(cleanupCtx, http.MethodDelete, smdURL+"/hsm/v2/State/Components/"+xname, nil)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		resp, err := httpClient.Do(req)
+		if err != nil {
+			t.Errorf("UC4 cleanup: %v", err)
+			return
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode/100 != 2 && resp.StatusCode != http.StatusNotFound {
+			t.Errorf("UC4 cleanup HTTP %d", resp.StatusCode)
+		}
+	})
 
 	componentBody := map[string]any{
 		"Components": []map[string]any{{
@@ -185,6 +271,7 @@ func TestUC4_Tokensmith_SMD(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build SMD POST: %v", err)
 	}
+	owned = true // preflight proved absence; clean up even after an interrupted response
 	postResp, err := httpClient.Do(postReq)
 	if err != nil {
 		t.Fatalf("POST SMD components: %v", err)
@@ -193,6 +280,21 @@ func TestUC4_Tokensmith_SMD(t *testing.T) {
 	postResp.Body.Close()
 	if postResp.StatusCode/100 != 2 {
 		t.Fatalf("expected SMD POST 2xx, got HTTP %d body=%s", postResp.StatusCode, postBody)
+	}
+
+	// Verify refreshed credentials can read the actual original-token mutation.
+	refreshRead, err := http.NewRequestWithContext(ctx, http.MethodGet, smdURL+"/hsm/v2/State/Components/"+xname, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	refreshRead.Header.Set("Authorization", "Bearer "+refreshed.AccessToken)
+	refreshReadResp, err := httpClient.Do(refreshRead)
+	if err != nil {
+		t.Fatal(err)
+	}
+	refreshReadResp.Body.Close()
+	if refreshReadResp.StatusCode != http.StatusOK {
+		t.Fatalf("refreshed-token SMD read HTTP %d", refreshReadResp.StatusCode)
 	}
 
 	// Step 5b: confirm the write landed via independent GET (no auth in dev).
@@ -258,10 +360,10 @@ func mintBootstrapToken(ctx context.Context, t *testing.T, container, storePath,
 		Policy         bootstrapPolicy `json:"policy"`
 	}
 	if err := json.Unmarshal(out, &resp); err != nil {
-		t.Fatalf("decode bootstrap-token create output: %v\nstdout=%s", err, string(out))
+		t.Fatalf("decode bootstrap-token create output: %v", err)
 	}
 	if resp.BootstrapToken == "" {
-		t.Fatalf("bootstrap-token create returned empty token, stdout=%s", string(out))
+		t.Fatal("bootstrap-token create returned empty token")
 	}
 	return resp.BootstrapToken, resp.Policy
 }

@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"sync/atomic"
@@ -119,7 +120,7 @@ func (r *ochami_runner) execute(input CLIInput, args ...string) CLIResult {
 	var stdout, stderr bytes.Buffer
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = strings.NewReader(input.Stdin), &stdout, &stderr
 	result.Err = cmd.Run()
-	result.Stdout, result.Stderr = stdout.String(), stderr.String()
+	result.Stdout, result.Stderr = uc8Sanitize(stdout.String()), uc8Sanitize(stderr.String())
 	if cmd.ProcessState != nil {
 		result.ExitCode = cmd.ProcessState.ExitCode()
 	}
@@ -170,3 +171,8 @@ func (r *ochami_runner) removeCanceledInvocation(name string, composeArgs []stri
 	}
 	return errors.Join(failures...)
 }
+
+// JWTs and token-bearing diagnostics must never appear in test artifacts.
+var uc8JWTText = regexp.MustCompile(`[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]+`)
+
+func uc8Sanitize(value string) string { return uc8JWTText.ReplaceAllString(value, "[REDACTED JWT]") }
