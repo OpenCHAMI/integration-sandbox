@@ -11,7 +11,7 @@ COMPOSE := docker compose -f compose/infra.yaml -f compose/bmc-sim.yaml -f compo
 # Export so scripts/load-images.sh sees it.
 export IMAGES
 
-.PHONY: help build-images up down seed test test-integration test-bats ci tail clean reset show-images refresh-releases
+.PHONY: help build-images up down seed test test-integration test-bats ci tail clean reset show-images refresh-releases uc8 uc8-auth
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-20s %s\n", $$1, $$2}'
@@ -58,7 +58,7 @@ seed: ## Seed Vault, S3, and SMD with fixtures (idempotent)
 # images/*.env never reaches it and compose falls back to :latest.
 # Values exported by the caller still win (load-images.sh caller-wins).
 test-integration: ## Run the Go integration suite against the running stack
-	@bash -c 'set -euo pipefail; source scripts/load-images.sh; cd tests && go test -tags integration -count=1 -v -timeout 10m ./integration/...'
+	@bash -c 'set -euo pipefail; source scripts/load-images.sh; cd tests && go test -tags integration -count=1 -v -timeout 30m ./integration/...'
 
 uc1: ## UC1 — populate SMD with nodes, verify visibility in boot-service + metadata-service
 	@cd tests && go test -tags integration -count=1 -v -timeout 5m -run '^TestUC1_' ./integration/...
@@ -70,6 +70,12 @@ uc3: ## UC3 — restart each container; confirm node register/read still works
 	@cd tests && go test -tags integration -count=1 -v -timeout 15m -run '^TestUC3_' ./integration/...
 
 uc-all: uc1 uc2 uc3 ## Run all use-case suites in sequence
+
+uc8: ## UC8 — Ochami CLI against live SMD, boot-service, and power-control
+	@bash -c 'set -euo pipefail; source scripts/load-images.sh; cd tests && go test -tags integration -count=1 -v -timeout 20m -run "^TestUC8_" ./integration/...'
+
+uc8-auth: ## UC8 — isolated boot authentication contracts (requires free port 27791)
+	@bash scripts/uc8-auth.sh
 
 test-bats: ## Run the bats CLI smoke suite against the running stack
 	@bats tests/bats/

@@ -166,7 +166,7 @@ func TestUC6_PowerControl_Redfish(t *testing.T) {
 // (gated off in compose/core.yaml::smd args). The OpenCHAMI flow is
 // magellan-as-source-of-truth; calling /Inventory/Discover would
 // silently 200 without populating anything.
-func ensureBMCDiscovered(ctx context.Context, t *testing.T, smdURL, bmcXname string) {
+func ensureBMCDiscovered(ctx context.Context, t *testing.T, smdURL, bmcXname string, imageEnv ...map[string]string) {
 	t.Helper()
 
 	// First, make sure the seed RedfishEndpoint is in place. UC5's
@@ -200,7 +200,7 @@ func ensureBMCDiscovered(ctx context.Context, t *testing.T, smdURL, bmcXname str
 
 	// Re-run magellan to populate ComponentEndpoints. Lives in
 	// uc5_magellan_scan_test.go in the same package; takes ~5s.
-	runMagellanPipeline(ctx, t)
+	runMagellanPipeline(ctx, t, imageEnv...)
 }
 
 // waitForComponentEndpoint polls SMD until the ComponentEndpoint for nodeXname
