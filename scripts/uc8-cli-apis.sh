@@ -55,6 +55,8 @@ export SBX_CLI_APIS_ENABLED=1
 if [[ "${1:-}" == pair ]]; then
   bash scripts/uc8-pr162.sh
 else
-  cd tests
-  go test -tags integration -count=1 -v -timeout 10m -run '^TestUC8_LiveLegacyAPIs$' ./integration/...
+  (
+    cd tests
+    go test -tags integration -count=1 -v -timeout 10m -run '^TestUC8_LiveLegacyAPIs$' ./integration/...
+  )
 fi

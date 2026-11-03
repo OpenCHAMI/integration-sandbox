@@ -62,5 +62,7 @@ if [[ "$ready" != true ]]; then
   printf 'Authentication target %s did not become reachable.\n' "$target"
   exit 1
 fi
-cd tests
-go test -tags integration -count=1 -v -timeout 5m -run '^TestUC8Auth_' ./integration/...
+(
+  cd tests
+  go test -tags integration -count=1 -v -timeout 5m -run '^TestUC8Auth_' ./integration/...
+)
