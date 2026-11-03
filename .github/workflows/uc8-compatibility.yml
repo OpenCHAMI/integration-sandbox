@@ -1,0 +1,135 @@
+# Copyright © 2026 OpenCHAMI a Series of LF Projects, LLC
+# SPDX-License-Identifier: MIT
+name: UC8 upstream compatibility
+
+# These contracts expose known upstream incompatibilities. Keep failures
+# visible without making them unconditional pull-request merge checks.
+on:
+  workflow_dispatch:
+    inputs:
+      images:
+        description: "CLI comparison manifest"
+        type: string
+        default: release
+      cli_image:
+        description: "Optional CLI image override"
+        type: string
+        default: ""
+      cli_jwx_major:
+        description: "jwx major used by the selected CLI (release v0.10.4 uses 3)"
+        type: choice
+        options: ["3", "4"]
+        default: "3"
+      enforcing_boot_image:
+        description: "Optional immutable enforcing boot image; empty tests the manifest pin"
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  cli:
+    name: "UC8 compatibility: CLI (${{ inputs.images }})"
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      IMAGES: ${{ inputs.images }}
+      SKIP_SIM: "true"
+      SBX_OCHAMI_IMAGE: ${{ inputs.cli_image }}
+      SBX_CLI_JWX_MAJOR: ${{ inputs.cli_jwx_major }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-go@v7.0.0
+        with:
+          go-version-file: tests/go.mod
+          cache-dependency-path: tests/go.sum
+      - name: Log in to GHCR
+        uses: docker/login-action@v4.5.2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Run strict CLI contracts twice on an owned stack
+        run: |
+          set -euo pipefail
+          source scripts/load-images.sh
+          log_dir="$PWD/logs/$(date -u +%Y%m%dT%H%M%SZ)/uc8-compatibility"
+          mkdir -p "$log_dir"
+          exec > >(tee "$log_dir/uc8-compatibility.log") 2>&1
+          owned=false
+          # Invoked by the EXIT trap below.
+          # shellcheck disable=SC2329
+          finish() {
+            rc=$?
+            if (( rc != 0 )); then bash scripts/log-bundle.sh uc8-compatibility-failure || true; fi
+            if [[ "$owned" == true ]]; then
+              docker compose -f compose/infra.yaml -f compose/bmc-sim.yaml -f compose/core.yaml down -v --remove-orphans || rc=1
+            fi
+            bash scripts/heartbeat.sh "uc8-compatibility-$rc" "CLI compatibility exit $rc; $log_dir"
+            exit "$rc"
+          }
+          trap finish EXIT
+          bash scripts/heartbeat.sh uc8-compatibility-starting "CLI compatibility: $IMAGES"
+          bash scripts/build-images.sh
+          owned=true
+          bash scripts/up.sh
+          bash fixtures/vault-seed.sh
+          bash fixtures/s3-buckets.sh
+          bash fixtures/seed-smd.sh
+          docker compose -f compose/infra.yaml -f compose/bmc-sim.yaml -f compose/core.yaml images > "$log_dir/images.txt"
+          result=0
+          for attempt in 1 2; do
+            if (cd tests && go test -tags integration -count=1 -v -timeout 20m -run '^TestUC8_' ./integration/...) 2>&1 | tee "$log_dir/run$attempt.log"; then
+              printf 'run%s PASS\n' "$attempt" >> "$log_dir/outcomes.txt"
+            else
+              printf 'run%s FAIL\n' "$attempt" >> "$log_dir/outcomes.txt"
+              result=1
+            fi
+          done
+          exit "$result"
+      - name: Upload compatibility diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: uc8-cli-compatibility-${{ github.run_id }}
+          path: logs/
+          retention-days: 30
+
+  boot-auth:
+    name: "UC8 compatibility: Boot authentication (${{ matrix.images }})"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        images: [default, release]
+    env:
+      IMAGES: ${{ matrix.images }}
+      SBX_BOOT_IMAGE: ${{ inputs.enforcing_boot_image }}
+      SBX_OCHAMI_IMAGE: ${{ inputs.cli_image }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-go@v7.0.0
+        with:
+          go-version-file: tests/go.mod
+          cache-dependency-path: tests/go.sum
+      - name: Run isolated authentication contracts
+        run: |
+          set -euo pipefail
+          log_dir="logs/$(date -u +%Y%m%dT%H%M%SZ)/boot-auth-input"
+          mkdir -p "$log_dir"
+          exec > >(tee "$log_dir/boot-auth-input.log") 2>&1
+          if [[ -n "$SBX_BOOT_IMAGE" && "$SBX_BOOT_IMAGE" != *@sha256:* ]]; then
+            printf 'Enforcing boot image must be immutable.\n' >&2
+            exit 1
+          fi
+          bash scripts/uc8-auth.sh
+      - name: Upload authentication diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: uc8-boot-auth-compatibility-${{ matrix.images }}-${{ github.run_id }}
+          path: logs/
+          retention-days: 30

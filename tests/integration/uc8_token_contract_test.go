@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -25,12 +24,16 @@ func uc8UnsignedToken(payload string) string {
 }
 
 func TestUC8_TokenLocalValidation(t *testing.T) {
+	// Both manifest CLI pins use jwx v3. The pinned migration harness
+	// explicitly selects v4 rather than inferring it from an unset variable.
+	major := envOr("SBX_CLI_JWX_MAJOR", "3")
+	require.Contains(t, []string{"3", "4"}, major, "unsupported CLI jwx major")
 	now := time.Now().Unix()
 	for _, test := range []struct {
 		name, payload, diagnostic string
 		rejected                  bool
 	}{
-		{"expired", fmt.Sprintf(`{"exp":%d}`, now-600), "token is expired:", true},
+		{"expired", fmt.Sprintf(`{"exp":%d}`, now-600), "token is expired", true},
 		{"future_nbf", fmt.Sprintf(`{"nbf":%d,"exp":%d}`, now+600, now+3600), "token is not yet valid", true},
 		{"future_iat", fmt.Sprintf(`{"iat":%d,"exp":%d}`, now+600, now+3600), "failed to parse token:", true},
 		{"duplicate_exp", fmt.Sprintf(`{"exp":%d,"exp":%d}`, now+3600, now+7200), "failed to parse token:", true},
@@ -62,7 +65,7 @@ func TestUC8_TokenLocalValidation(t *testing.T) {
 			}, "yaml")
 			result := r.execute(CLIInput{ConfigPath: config, GlobalArgs: []string{"--token", raw}}, args...)
 			// Duplicate-claim rejection is an intentional v4 behavior change.
-			rejected := test.rejected && (os.Getenv("SBX_CLI_JWX_MAJOR") != "3" || !strings.HasPrefix(test.name, "duplicate_"))
+			rejected := test.rejected && (major != "3" || !strings.HasPrefix(test.name, "duplicate_"))
 			if rejected {
 				requireUC8CLIFailure(t, r, result)
 				require.Equal(t, 4, result.ExitCode)

@@ -133,6 +133,20 @@ The manually dispatched **PR162 CLI validation** workflow provides this dedicate
 runner. Its pinned commits must be fetchable upstream; locally committed source
 can be built using `SBX_OCHAMI_SOURCE` without publishing it automatically.
 
+Pull-request CI uses the default CLI compatibility pin. The manually dispatched
+**UC8 upstream compatibility** workflow retains the release CLI and isolated
+boot authentication checks that currently expose upstream failures: release
+v0.10.4 has the explicit-cluster regression, and boot v0.3.2 does not enforce
+inbound JWTs. Failures remain nonzero and diagnostic artifacts are uploaded.
+The CLI check runs twice against one seeded stack, even when the first attempt
+fails. When overriding the CLI image, select its jwx major in the workflow input
+so duplicate-claim expectations match that revision. The default release pin
+uses jwx v3. Supply an immutable `enforcing_boot_image` to check a boot build
+with inbound enforcement. These compatibility jobs are separate from the normal
+pull-request gate; moving them does not establish an authentication pass.
+Direct UC8 runs also default token-validation expectations to jwx v3 for the
+manifest pins; set `SBX_CLI_JWX_MAJOR=4` when supplying a migrated CLI image.
+
 For slices on an already healthy dedicated stack, use `make uc8-cli-apis` or
 `SBX_DEDICATED_RUNNER=1 make uc8-pr162`. The latter neither seeds nor tears down
 services, checks running images against the selected manifest before each

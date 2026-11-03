@@ -26,8 +26,12 @@ validation without mutation, HTTP/transport errors, timeout, cancellation,
 and legacy cloud-init formats. Legacy `/admin/*` routes are unavailable in
 the pinned metadata service, so fixture success is not live compatibility.
 
-CI runs default and release independently, twice against each seeded stack
-without reseeding. Each Go run has 20 minutes and each job 60 minutes.
+Pull-request CI runs the default CLI twice against one seeded stack without
+reseeding. The manually dispatched **UC8 upstream compatibility** workflow
+runs the release CLI twice on its own seeded stack and runs boot authentication
+independently for both manifests. These compatibility checks retain nonzero
+failures for the known upstream regressions. Each Go run has 20 minutes and
+each CLI job 60 minutes.
 Version has 30 seconds, SMD one minute, each boot flow two minutes, and PCS
 eight minutes. Artifacts contain per-attempt logs and resolved image
 identities; summaries use the actual test-step outcome.
@@ -43,6 +47,9 @@ ephemeral signing keys. Tests require direct acceptance of valid tokens and
 rejection of missing, incorrectly signed, and expired tokens, then check
 CLI behavior. Boot v0.3.2 fails rejection because inbound auth is unwired.
 The separate profile refuses an occupied port and preserves existing stacks.
+The manual compatibility workflow accepts an immutable enforcing boot image
+override; without one, the pinned boot image is expected to fail rejection
+contracts. These checks do not run as unconditional pull-request merge gates.
 
 See [completeness and validation limits](../uc8-completeness-review.md).
 Live boot CRUD passed twice; full SMD/PCS runs await a healthy stack.

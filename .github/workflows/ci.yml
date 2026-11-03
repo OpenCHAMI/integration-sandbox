@@ -18,6 +18,8 @@
 # - SKIP_SIM: skip building/starting ipmi-sim and remote-console (default: true)
 # - SBX_*_IMAGE: override any service image (e.g., for PR builds)
 # - IMAGES: manifest selection (release | default | edge | release-v1.0)
+# Known-incompatible release CLI and boot authentication checks live in the
+# manually dispatched uc8-compatibility.yml workflow; assertions remain strict.
 
 name: ci
 
@@ -265,33 +267,6 @@ jobs:
   # blurbs for $GITHUB_STEP_SUMMARY, doc link) lives in matrix.include
   # so adding or tweaking a UC is one block, not 90 lines of copy-paste.
   # ──────────────────────────────────────────────────────────────────────────
-  test-uc8-auth:
-    name: "UC8: Boot authentication (${{ matrix.images }})"
-    needs: test-bats
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        images: [default, release]
-    env:
-      IMAGES: ${{ matrix.images }}
-    steps:
-      - uses: actions/checkout@v7.0.1
-      - uses: actions/setup-go@v7.0.0
-        with:
-          go-version-file: tests/go.mod
-          cache-dependency-path: tests/go.sum
-      - name: Run isolated authentication contracts
-        run: bash scripts/uc8-auth.sh
-      - name: Upload authentication diagnostics
-        if: always()
-        uses: actions/upload-artifact@v7.0.1
-        with:
-          name: uc8-auth-${{ matrix.images }}-${{ github.run_id }}
-          path: logs/
-          retention-days: 30
-
   test-uc:
     name: "${{ matrix.label }}"
     needs: test-bats
@@ -360,16 +335,6 @@ jobs:
           - id: uc8
             label: "UC8: Ochami CLI (default)"
             images: default
-            timeout: 60
-            go_timeout: 20m
-            repetitions: 2
-            test_re: '^TestUC8_'
-            services: "ochami CLI, tokensmith, SMD, boot-service, power-control, magellan, sushy-tools"
-            assertions: "Run all UC8 contracts twice against the same seeded stack; verify CRUD, CLI errors, configuration, cancellation, and independent Redfish transition results."
-            doc: uc8-ochami-cli.md
-          - id: uc8-release
-            label: "UC8: Ochami CLI (release)"
-            images: release
             timeout: 60
             go_timeout: 20m
             repetitions: 2

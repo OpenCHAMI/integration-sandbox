@@ -83,3 +83,7 @@ Everything else (`make build-images`, `make up`, `make seed`, `make test`, `make
   dedicated live comparison gates readiness before each attempt.
 - External OIDC and signing-key rotation are not proven by local-user minting
   or refresh-token rotation. See `docs/pr162-validation.md` for precise limits.
+- Pull-request UC8 uses the default CLI pin. Known-failing release CLI and
+  boot JWT enforcement checks live in the manually dispatched
+  `.github/workflows/uc8-compatibility.yml`; they retain strict assertions and
+  nonzero failures. See `docs/operations.md` for overrides and limits.
