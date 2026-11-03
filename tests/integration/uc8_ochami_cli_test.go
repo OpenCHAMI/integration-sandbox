@@ -340,14 +340,16 @@ func TestUC8_Ochami_CLI(t *testing.T) {
 		r := runner(t, time.Minute)
 		prepareToken(t, r)
 		scope.Group = true
-		component := uc8Resource(t, uc8Command(t, r, "", "smd", "component", "get", "--xname", "x0c0s0b0n0", "-F", "json"), "json")
-		require.Equal(t, "x0c0s0b0n0", component["ID"])
+		const member = "x0c0s0b0n0"
+		component := uc8Resource(t, uc8Command(t, r, "", "smd", "component", "get", "--xname", member, "-F", "json"), "json")
+		require.Equal(t, member, component["ID"])
 		require.Equal(t, "Node", component["Type"])
 		require.Empty(t, uc8Command(t, r, "", "smd", "group", "add", resourceName))
-		require.Empty(t, uc8Command(t, r, "", "smd", "group", "member", "add", resourceName, "x0c0s0b0"))
+		require.Empty(t, uc8Command(t, r, "", "smd", "group", "member", "add", resourceName, member))
 		out := uc8Command(t, r, "", "smd", "group", "get", "--name", resourceName)
-		require.JSONEq(t, fmt.Sprintf(`[{"description":"","label":%q,"members":{"ids":["x0c0s0b0"]}}]`, resourceName), out)
-		require.JSONEq(t, `{"ids":["x0c0s0b0"]}`, uc8Command(t, r, "", "smd", "group", "member", "get", resourceName))
+		require.JSONEq(t, fmt.Sprintf(`[{"description":"","label":%q,"members":{"ids":[%q]}}]`, resourceName, member), out)
+		members := fmt.Sprintf(`{"ids":[%q]}`, member)
+		require.JSONEq(t, members, uc8Command(t, r, "", "smd", "group", "member", "get", resourceName))
 		uc8Command(t, r, "", "smd", "group", "update", "--description", "uc8 updated", "--tag", resourceName, resourceName)
 		var updated []struct {
 			Label       string   `json:"label"`
@@ -359,9 +361,9 @@ func TestUC8_Ochami_CLI(t *testing.T) {
 		require.Equal(t, resourceName, updated[0].Label)
 		require.Equal(t, "uc8 updated", updated[0].Description)
 		require.Contains(t, updated[0].Tags, resourceName)
-		require.JSONEq(t, `{"ids":["x0c0s0b0"]}`, uc8Command(t, r, "", "smd", "group", "member", "get", resourceName), "description/tag update must preserve membership")
+		require.JSONEq(t, members, uc8Command(t, r, "", "smd", "group", "member", "get", resourceName), "description/tag update must preserve membership")
 
-		require.Empty(t, uc8Command(t, r, "", "smd", "group", "member", "delete", "--no-confirm", resourceName, "x0c0s0b0"))
+		require.Empty(t, uc8Command(t, r, "", "smd", "group", "member", "delete", "--no-confirm", resourceName, member))
 		out = uc8Command(t, r, "", "smd", "group", "member", "get", resourceName)
 		require.JSONEq(t, `{"ids":[]}`, out,
 			"member deletion must be observable in the group GET")
