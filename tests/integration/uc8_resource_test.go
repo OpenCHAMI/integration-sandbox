@@ -18,7 +18,9 @@ import (
 func uc8FixtureFile(t *testing.T, name, content string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), name)
-	require.NoError(t, os.WriteFile(path, []byte(content), 0600))
+	// The read-only bind mount retains host permissions. These synthetic
+	// fixtures must also be readable by the CLI image's unprivileged UID.
+	require.NoError(t, os.WriteFile(path, []byte(content), 0644))
 	return path
 }
 
