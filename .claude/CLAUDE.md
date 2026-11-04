@@ -32,6 +32,12 @@ Everything else (`make build-images`, `make up`, `make seed`, `make test`, `make
 
 ## Conventions (don't reinvent)
 - 8 fake nodes, xnames `x0c0s0b0` … `x0c0s7b0`.
+- UC8 reserves `x0c0s0b0n1` for an owned boot-node CRUD fixture only.
+  It has no BMC simulator or SMD seed; never issue power operations for it.
+- `make uc8-auth` owns an isolated boot/tokensmith project, reuses boot port
+  27791 only when unoccupied, and publishes no tokensmith port. Keys live in
+  tmpfs; local minting is enabled only for contract tokens. This profile
+  requires actual inbound JWT enforcement; boot v0.3.2 fails its rejection tests.
 - BMC creds everywhere: `root` / `root_password` (matches both emulator hardcoded defaults).
 - Vault root token: `dev-root-token` (matches operator's `hack/local-dev/seed-vault.sh`).
 - LocalStack S3: `test`/`test`, region `us-east-1`, buckets `boot-images`, `openchami-logs`, `parquet`.

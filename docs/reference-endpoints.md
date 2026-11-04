@@ -2,6 +2,18 @@
 
 Every URL the harness publishes, what it returns, and which test exercises it.
 
+UC8 reserves node xname `x0c0s0b0n1` only for boot-node CRUD. It is not
+seeded into SMD and has no Redfish endpoint. The test refuses an existing
+record with that xname and deletes only its uniquely named, UID-owned node.
+
+`make uc8-auth` uses an isolated Compose project and the existing boot port
+27791, refusing an occupied port. Tokensmith and its JWKS endpoint remain
+internal on port 27780. Signing keys are generated in tmpfs; local user minting
+is enabled to produce valid and expired contract tokens. Auth tests require
+missing, expired (beyond two minutes of skew), and incorrectly signed JWTs to
+be rejected independently by the service. Boot v0.3.2 currently fails this
+requirement; enabling its auth flag alone does not establish enforcement.
+
 ## Infra
 
 | URL | Returns | Tested in |

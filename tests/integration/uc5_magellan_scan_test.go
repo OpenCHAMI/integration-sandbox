@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"os/exec"
 	"strings"
 	"testing"
@@ -184,7 +185,7 @@ func sortedKeys(m map[string]redfishEndpoint) []string {
 //     run` hands the container a fifo that IsStdinEmpty() misread as
 //     piped data, making collect find nothing and exit 1 — is gone. The
 //     image pin (images/default.env) must stay ≥ v0.6.1 for that to hold.
-func runMagellanPipeline(ctx context.Context, t *testing.T) {
+func runMagellanPipeline(ctx context.Context, t *testing.T, imageEnv ...map[string]string) {
 	t.Helper()
 
 	idMapJSON := bmcIDMapJSON(t)
@@ -208,6 +209,12 @@ stat /tmp/inventory.json
 		"magellan-runner",
 		"-c", script,
 	)
+	cmd.Env = os.Environ()
+	for _, env := range imageEnv {
+		for key, value := range env {
+			cmd.Env = append(cmd.Env, key+"="+value)
+		}
+	}
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("magellan pipeline failed: %v\noutput:\n%s", err, string(out))
