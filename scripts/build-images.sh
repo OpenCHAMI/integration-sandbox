@@ -13,12 +13,20 @@ source "$ROOT/scripts/load-images.sh"
 
 bash scripts/heartbeat.sh build-starting "pulling images for IMAGES=${IMAGES:-default}"
 
+# For our local tag we pull the upstream base and patch it below; for an
+# external override (anything else) we pull that image directly.
+if [[ "$SBX_SUSHY_IMAGE" == "openchami-sandbox/sushy-tools:latest" ]]; then
+  SBX_SUSHY_PULL_IMAGE="$SBX_SUSHY_BASE_IMAGE"
+else
+  SBX_SUSHY_PULL_IMAGE="$SBX_SUSHY_IMAGE"
+fi
+
 # Public images we expect to pull.
 PULL_LIST=(
   "$SBX_VAULT_IMAGE"
   "$SBX_LOCALSTACK_IMAGE"
   "$SBX_POSTGRES_IMAGE"
-  "$SBX_SUSHY_IMAGE"
+  "$SBX_SUSHY_PULL_IMAGE"
   "$SBX_SMD_IMAGE"
   "$SBX_TOKENSMITH_IMAGE"
   "$SBX_BOOT_IMAGE"
@@ -41,12 +49,15 @@ done
 # EthernetInterface IP (see images/sushy/Dockerfile), which SMD requires. Build
 # a thin patched image on top of the pulled base so UC5/UC6 get valid, unique
 # per-node MAC+IP data. bmc-sim.yaml references this fixed local tag.
-SBX_SUSHY_PATCHED_IMAGE="openchami-sandbox/sushy-tools:latest"
-printf '[build] %s (patched from %s)\n' "$SBX_SUSHY_PATCHED_IMAGE" "$SBX_SUSHY_IMAGE"
-docker build -q \
-  --build-arg BASE="$SBX_SUSHY_IMAGE" \
-  -t "$SBX_SUSHY_PATCHED_IMAGE" \
-  "$ROOT/images/sushy" >/dev/null
+# Only build when the manifest asks for our local tag; an external override
+# (a prebuilt Redfish emulator) is pulled and used as-is.
+if [[ "$SBX_SUSHY_IMAGE" == "openchami-sandbox/sushy-tools:latest" ]]; then
+  printf '[build] %s (patched from %s)\n' "$SBX_SUSHY_IMAGE" "$SBX_SUSHY_BASE_IMAGE"
+  docker build -q \
+    --build-arg BASE="$SBX_SUSHY_BASE_IMAGE" \
+    -t "$SBX_SUSHY_IMAGE" \
+    "$ROOT/images/sushy" >/dev/null
+fi
 
 # IPMI sim is built from sibling repo (no public image expected).
 # Skip if SKIP_SIM is set to true.

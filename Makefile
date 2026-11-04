@@ -32,7 +32,7 @@ refresh-releases: ## Re-query GitHub for each service's latest release; rewrites
 show-images: ## Print the resolved image set for the current IMAGES + overrides
 	@bash -c 'set -e; source scripts/load-images.sh >/dev/null; \
 	  for v in SBX_VAULT_IMAGE SBX_LOCALSTACK_IMAGE SBX_POSTGRES_IMAGE \
-	           SBX_SUSHY_IMAGE SBX_IPMI_SIM_IMAGE \
+	           SBX_SUSHY_BASE_IMAGE SBX_SUSHY_IMAGE SBX_IPMI_SIM_IMAGE \
 	           SBX_SMD_IMAGE SBX_TOKENSMITH_IMAGE SBX_BOOT_IMAGE \
 	           SBX_METADATA_IMAGE SBX_FRU_IMAGE SBX_POWER_IMAGE SBX_MAGELLAN_IMAGE; do \
 	    printf "  %-22s %s\n" "$$v" "$${!v}"; \
