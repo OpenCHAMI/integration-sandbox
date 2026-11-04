@@ -1,0 +1,20 @@
+{
+    "@odata.type": "#EthernetInterface.v1_0_2.EthernetInterface",
+    "Id": {{ nic['id']|string|tojson }},
+    "Name": {{ "VNIC %s"|format(nic['id'])|tojson }},
+    "Status": {
+        "State": "Enabled",
+        "Health": "OK"
+    },
+    "PermanentMACAddress": {{ nic['mac']|string|tojson }},
+    "MACAddress": {{ nic['mac']|string|tojson }},
+{%- if nic.get('ip') %}
+    "IPv4Addresses": [
+        {
+            "Address": {{ nic['ip']|string|tojson }}
+        }
+    ],
+{%- endif %}
+    "@odata.context": "/redfish/v1/$metadata#EthernetInterface.EthernetInterface",
+    "@odata.id": {{ "/redfish/v1/Systems/%s/EthernetInterfaces/%s"|format(identity, nic['id'])|tojson }}
+}

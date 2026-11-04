@@ -39,6 +39,8 @@ declare -a STATIC=(
   "SBX_VAULT_IMAGE=hashicorp/vault:1.21"
   "SBX_LOCALSTACK_IMAGE=localstack/localstack:3"
   "SBX_POSTGRES_IMAGE=postgres:16-alpine"
+  "SBX_SUSHY_BASE_IMAGE=quay.io/metal3-io/sushy-tools:latest"
+  "SBX_SUSHY_IMAGE=openchami-sandbox/sushy-tools:latest"
   "SBX_IPMI_SIM_IMAGE=openchami/ipmi-sim:dev"
 )
 
@@ -130,10 +132,9 @@ EOF
   printf '# Infra (third-party, version-pinned)\n'
   for s in "${STATIC[@]:0:3}"; do printf '%s\n' "$s"; done
   printf '\n# BMC sims\n'
-  printf '%s\n' "${resolved[0]}"
   for s in "${STATIC[@]:3}"; do printf '%s\n' "$s"; done
   printf '\n# OpenCHAMI services (pinned to latest GitHub Release)\n'
-  for r in "${resolved[@]:1}"; do printf '%s\n' "$r"; done
+  for r in "${resolved[@]}"; do printf '%s\n' "$r"; done
 } > "$OUT.tmp"
 
 if (( PRINT_ONLY == 1 )); then
