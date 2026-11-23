@@ -32,9 +32,48 @@ Everything else (`make build-images`, `make up`, `make seed`, `make test`, `make
 
 ## Conventions (don't reinvent)
 - 8 fake nodes, xnames `x0c0s0b0` … `x0c0s7b0`.
+- Declarative lifecycle scenarios reserve `x1c0s0b0n0` … `x1c0s7b0n0`
+  with NIDs `10000` … `10007` in their isolated Compose run. Cases run
+  serially, use per-case randomized locally administered MACs, require SMD
+  absence before creation, and clean up only their own resources. Canonical
+  `x0` safety witnesses remain unchanged. Only the three legacy
+  characterization scenarios may seed/update a legacy boot-service Node;
+  new-provider scenarios remain SMD-only.
 - BMC creds everywhere: `root` / `root_password` (matches both emulator hardcoded defaults).
 - Vault root token: `dev-root-token` (matches operator's `hack/local-dev/seed-vault.sh`).
 - LocalStack S3: `test`/`test`, region `us-east-1`, buckets `boot-images`, `openchami-logs`, `parquet`.
+- Declarative acceptance uses a separate Compose project. PostgreSQL uses the
+  test-only `openchami`/`openchami` credentials; no BMC credentials are used.
+  SMD `27779`, the TokenSmith facade `27780`, and two boot instances `27790`
+  use distinct preselected ephemeral loopback host ports, exported before
+  Compose creates containers as `SBX_DECLARATIVE_BOOT_HOST_PORT`,
+  `SBX_DECLARATIVE_AUTH_OFF_HOST_PORT`, `SBX_DECLARATIVE_SMD_HOST_PORT`, and
+  `SBX_DECLARATIVE_TOKENSMITH_HOST_PORT`. Docker's bind is authoritative; the
+  preselection is not a reservation, and collisions fail the run.
+  Metrics are on the main boot `/metrics`;
+  its dedicated internal metrics listener is `27791`. Registry port 5000 is
+  untouched. The facade's test signing keys are run-only.
+- The host boot client uses `--server` and `BOOT_SERVICE_TOKEN`, never a token
+  argument. Required control environment, witness nodes and teardown are in
+  `docs/use-cases/uc8-declarative-boot.md`.
+- Declarative runs export a run-owned `SBX_DECLARATIVE_QUIESCENCE_LOCK` before
+  seeding; its `.inflight` markers must never be automatically cleared. This
+  covers cooperating captured-record writers, not global volume atomicity or
+  HSM background Node writes.
+- Baseline-only failure labels require the exact PR75 image, image revision and
+  clean source HEAD, actual `/openapi.json` exact-path absence, a clock anchor
+  and unambiguous timestamped request evidence. The three adoption cases may
+  include a separately evidenced cleanup 405 on an absent assignment path;
+  conflicting requests or missing evidence remain unclassified, never passing.
+- The auth-enabled boot instance reads its HSM bootstrap token from the
+  read-only `/run/boot-config` directory bind, not a static token environment
+  variable. A run-local provisioner must mint a fresh real TokenSmith token for
+  every controlled start, including initial start via `prepare-boot-identity`;
+  this is not production durable identity. If
+  `identity-redaction-incomplete` exists, failure capture is metadata-only.
+  Raw config
+  and the private redaction ledger are removed after owned processes stop and
+  excluded from CI evidence uploads even if cleanup fails.
 - Image tag policy: `make ci` defaults to `IMAGES=release` (`images/release.env`,
   each OpenCHAMI service pinned to its latest GitHub Release tag). Refresh
   with `make refresh-releases`. Use `IMAGES=default` for floating `:latest`,

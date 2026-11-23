@@ -79,6 +79,10 @@ test: test-bats test-integration ## Run both test suites
 # wipe the seeded secrets that bats asserts on. Integration tests are
 # self-sufficient and don't depend on bats results.
 
+.PHONY: test-declarative-boot
+test-declarative-boot: ## Run isolated declarative acceptance against an explicit image and host client
+	@bash scripts/test-declarative-boot.sh
+
 ci: ## End-to-end automation: up → seed → test → down (with log bundle on failure)
 	@bash scripts/heartbeat.sh ci-starting "make ci begin (IMAGES=$(IMAGES))"
 	@set -e; \

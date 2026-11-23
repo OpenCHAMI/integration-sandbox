@@ -25,6 +25,23 @@ Every URL the harness publishes, what it returns, and which test exercises it.
 
 Tested in `smd_test.go`, all UC files.
 
+### Declarative lifecycle scratch identities
+
+Within the isolated declarative acceptance project, lifecycle cases run
+serially and reserve the valid test-only pool `x1c0s0b0n0` through
+`x1c0s7b0n0`, paired with NIDs `10000` through `10007` and per-case randomized
+locally administered MAC addresses. Each case requires `GET` of its SMD
+component to return 404 before creating it and removes only the components,
+interfaces, and groups it created. The canonical `x0` safety witnesses and
+the frozen `nodes.json` are unchanged. These fixed scratch identities must not
+be shared by concurrent cases against the same service instance.
+
+The three legacy characterization cases may use the existing public `/nodes`
+CRUD to seed the legacy local provider: they inspect by `spec.xname`, refuse
+ambiguous duplicates, and restore a preexisting spec or delete only the UID
+they created. All new-provider, selector, cache, and SMD-freshness cases remain
+SMD-only and do not POST or PUT boot-service Nodes.
+
 ## Tokensmith (`http://127.0.0.1:27780`)
 
 | URL | Returns |
