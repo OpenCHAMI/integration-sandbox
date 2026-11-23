@@ -1,0 +1,23 @@
+{
+  "assignments": [
+    {
+      "name": "group-default",
+      "spec": {"selector": {"groups": ["acceptance-red", "acceptance-blue"]}, "priority": 100, "configRef": {"name": "acceptance-os", "selector": "default"}}
+    },
+    {
+      "name": "mac-canary",
+      "spec": {"selector": {"macs": ["02-00-00-00-00-00"]}, "priority": 0, "configRef": {"name": "acceptance-os", "revisionName": "release-b"}}
+    },
+    {
+      "name": "pinned-a",
+      "spec": {"selector": {"xnames": ["x0c0s2b0n0"]}, "priority": 0, "configRef": {"name": "acceptance-os", "revisionName": "release-a"}}
+    }
+  ],
+  "referenceVariants": {
+    "bareDefault": {"name": "acceptance-os"},
+    "explicitDefault": {"name": "acceptance-os", "selector": "default"},
+    "latest": {"name": "acceptance-os", "selector": "latest"},
+    "namedA": {"name": "acceptance-os", "revisionName": "release-a"},
+    "uidA": {"value": {"name": "acceptance-os"}, "bind": {"/uid": "revisionA.uid"}}
+  }
+}

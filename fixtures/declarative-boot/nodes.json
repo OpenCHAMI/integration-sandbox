@@ -1,0 +1,9 @@
+{
+  "provider": "SMD",
+  "nodes": [
+    {"role": "canary", "xname": "x0c0s0b0n0", "nid": 1000, "mac": "02:00:00:00:00:00", "groups": ["acceptance-red", "acceptance-blue"]},
+    {"role": "default", "xname": "x0c0s1b0n0", "nid": 1001, "mac": "02:00:00:00:00:01", "groups": ["acceptance-red", "acceptance-blue"]},
+    {"role": "pinned", "xname": "x0c0s2b0n0", "nid": 1002, "mac": "02:00:00:00:00:02", "groups": ["acceptance-red"]},
+    {"role": "legacy", "xname": "x0c0s3b0n0", "nid": 1003, "mac": "02:00:00:00:00:03", "groups": []}
+  ]
+}

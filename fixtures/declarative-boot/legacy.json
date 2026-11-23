@@ -1,0 +1,15 @@
+{
+  "source": "fixtures/boot-configs.json",
+  "node": "x0c0s3b0n0",
+  "default": {
+    "Kernel": "https://images.example.invalid/boot-images/sandbox-kernel",
+    "Initrd": "https://images.example.invalid/boot-images/sandbox-initrd",
+    "Params": "console=ttyS0 root=live:s3://boot-images/sandbox-rootfs.squashfs ip=dhcp"
+  },
+  "adoption": {
+    "series": "adopted-legacy",
+    "assignment": "adopted-legacy-node",
+    "sourceUIDBinding": "legacySource.uid",
+    "revisionNameRule": "legacy-<sourceUID> when valid; otherwise deterministic valid-name digest"
+  }
+}

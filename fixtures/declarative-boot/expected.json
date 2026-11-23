@@ -1,0 +1,21 @@
+{
+  "artifacts": {
+    "A": {
+      "kernel": "https://images.example.invalid/boot-images/acceptance-a-kernel",
+      "initrd": "https://images.example.invalid/boot-images/acceptance-a-initrd",
+      "params": ["console=ttyS0", "root=live:s3://boot-images/acceptance-a-rootfs.squashfs", "release=A", "ip=dhcp"]
+    },
+    "B": {
+      "kernel": "https://images.example.invalid/boot-images/acceptance-b-kernel",
+      "initrd": "https://images.example.invalid/boot-images/acceptance-b-initrd",
+      "params": ["console=ttyS1", "root=live:s3://boot-images/acceptance-b-rootfs.squashfs", "release=B", "ip=static"]
+    }
+  },
+  "deliveryStages": [
+    {"stage": "created-A", "defaultPointer": "A", "latestPointer": "A", "default": "A", "pinned": "A"},
+    {"stage": "ensured-B-twice-before-canary", "defaultPointer": "A", "latestPointer": "B", "default": "A", "pinned": "A"},
+    {"stage": "canary-B", "defaultPointer": "A", "latestPointer": "B", "canary": "B", "default": "A", "pinned": "A"},
+    {"stage": "promoted-B", "defaultPointer": "B", "latestPointer": "B", "canary": "B", "default": "B", "pinned": "A"},
+    {"stage": "rolled-back-A", "defaultPointer": "A", "latestPointer": "B", "canary": "B", "default": "A", "pinned": "A"}
+  ]
+}
