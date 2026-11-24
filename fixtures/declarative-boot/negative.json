@@ -1,0 +1,10 @@
+{
+  "cases": [
+    {"id": "conflicting-reference-discriminators", "classification": "negative", "spec": {"configRef": {"name": "acceptance-os", "revisionName": "release-a", "selector": "latest"}}, "expectedStatusClass": 4, "unchanged": true},
+    {"id": "duplicate-assignment-name", "classification": "negative", "method": "POST", "path": "/bootassignments", "body": {"metadata": {"name": "group-default"}, "spec": {"configRef": {"name": "acceptance-os"}}}, "expectedStatus": 409, "unchanged": true},
+    {"id": "malformed-json", "classification": "negative", "method": "POST", "path": "/bootassignments", "rawBody": "{\"spec\":", "expectedStatusClass": 4, "unchanged": true},
+    {"id": "wrong-series-revision", "classification": "negative", "spec": {"configRef": {"name": "different-series"}}, "bind": {"/spec/configRef/uid": "revisionA.uid"}, "expectedStatus": 422, "unchanged": true},
+    {"id": "missing-revision", "classification": "negative", "spec": {"configRef": {"name": "acceptance-os", "revisionName": "missing-revision"}}, "expectedStatus": 422, "unchanged": true},
+    {"id": "retired-revision", "classification": "negative", "spec": {"configRef": {"name": "acceptance-os"}}, "bind": {"/spec/configRef/uid": "retiredRevision.uid"}, "expectedStatus": 422, "unchanged": true}
+  ]
+}

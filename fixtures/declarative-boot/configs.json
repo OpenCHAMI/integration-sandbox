@@ -1,0 +1,21 @@
+{
+  "series": "acceptance-os",
+  "revisions": {
+    "A": {
+      "revisionName": "release-a",
+      "spec": {
+        "kernel": "https://images.example.invalid/boot-images/acceptance-a-kernel",
+        "initrd": "https://images.example.invalid/boot-images/acceptance-a-initrd",
+        "params": "console=ttyS0 root=live:s3://boot-images/acceptance-a-rootfs.squashfs release=A ip=dhcp"
+      }
+    },
+    "B": {
+      "revisionName": "release-b",
+      "spec": {
+        "kernel": "https://images.example.invalid/boot-images/acceptance-b-kernel",
+        "initrd": "https://images.example.invalid/boot-images/acceptance-b-initrd",
+        "params": "console=ttyS1 root=live:s3://boot-images/acceptance-b-rootfs.squashfs release=B ip=static"
+      }
+    }
+  }
+}
