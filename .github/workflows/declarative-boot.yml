@@ -1,0 +1,100 @@
+# Copyright © 2026 OpenCHAMI a Series of LF Projects, LLC
+# SPDX-License-Identifier: MIT
+name: declarative-boot
+on:
+  pull_request:
+    paths:
+      - 'tests/declarativeboot/**'
+      - 'tests/cmd/declarative-*/**'
+      - 'tests/internal/quiescence/**'
+      - 'fixtures/declarative-boot/**'
+      - 'scripts/test-declarative-boot*.sh'
+      - 'compose/declarative-*'
+      - '.github/workflows/declarative-boot.yml'
+  workflow_dispatch:
+    inputs:
+      boot_image:
+        description: Candidate boot-service image
+        required: true
+        type: string
+      boot_client_ref:
+        description: Matching boot-service source ref for the host client
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      boot_image:
+        required: true
+        type: string
+      boot_client_ref:
+        required: true
+        type: string
+permissions:
+  contents: read
+  packages: read
+jobs:
+  offline:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v7.0.0
+        with:
+          go-version: '1.26.10'
+          cache-dependency-path: tests/go.sum
+      - name: Compile acceptance and exercise fixture helpers
+        env:
+          GOTOOLCHAIN: go1.26.10
+        run: |
+          set -euo pipefail
+          unset SBX_DECLARATIVE_QUIESCENCE_LOCK SBX_DECLARATIVE_QUIESCENCE_INODE SBX_DECLARATIVE_BOOT_URL SBX_DECLARATIVE_AUTH_OFF_URL
+          [[ "$(grep -Fc "\"\$SBX_DECLARATIVE_CONTROL_BIN\" prepare-boot-identity" scripts/test-declarative-boot.sh)" == 1 ]]
+          if grep -Eq 'tokensmith bootstrap-token create|credential-issuance\.jsonl|test-declarative-boot-config\.sh' scripts/test-declarative-boot.sh; then exit 1; fi
+          go -C tests test -race -shuffle=on -count=1 -tags 'integration declarative_boot' -skip '^TestDeclarative(Lifecycle|Safety)$' ./declarativeboot/...
+          go -C tests test -race -count=1 ./cmd/declarative-fixture/... ./cmd/declarative-control/... ./cmd/declarative-ports/... ./internal/quiescence/...
+          jq -e '.scenarios | length == 36 and (map(.id) | unique | length == 36)' fixtures/declarative-boot/scenarios.json
+          bash -n scripts/test-declarative-boot*.sh
+          shellcheck scripts/test-declarative-boot*.sh
+          bash scripts/test-declarative-boot-classifier-test.sh
+  live:
+    if: github.event_name != 'pull_request'
+    needs: offline
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v7.0.1
+        with:
+          repository: OpenCHAMI/boot-service
+          ref: ${{ inputs.boot_client_ref }}
+          path: .candidate-boot
+          persist-credentials: false
+      - uses: actions/setup-go@v7.0.0
+        with:
+          go-version: '1.26.10'
+          cache-dependency-path: tests/go.sum
+      - name: Build matching client and run acceptance
+        env:
+          GOTOOLCHAIN: go1.26.10
+          SBX_DECLARATIVE_BOOT_IMAGE: ${{ inputs.boot_image }}
+        run: |
+          set -euo pipefail
+          go -C .candidate-boot build -o "$RUNNER_TEMP/boot-client" ./cmd/client
+          export SBX_DECLARATIVE_BOOT_CLIENT_BIN="$RUNNER_TEMP/boot-client"
+          export SBX_DECLARATIVE_BASELINE_SOURCE="$GITHUB_WORKSPACE/.candidate-boot"
+          docker pull "$SBX_DECLARATIVE_BOOT_IMAGE"
+          make test-declarative-boot
+      - name: Upload run evidence
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: declarative-boot-${{ github.run_id }}
+          path: |
+            logs/issue50/run-*/
+            !logs/issue50/run-*/config/**
+            !logs/issue50/run-*/credentials.redactions
+          retention-days: 14
+          if-no-files-found: ignore

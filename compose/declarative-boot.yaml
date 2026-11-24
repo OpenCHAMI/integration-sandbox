@@ -1,0 +1,72 @@
+# Copyright © 2026 OpenCHAMI a Series of LF Projects, LLC
+# SPDX-License-Identifier: MIT
+services:
+  postgres:
+    image: ${SBX_POSTGRES_IMAGE:-postgres:16-alpine}
+    environment:
+      POSTGRES_USER: openchami
+      POSTGRES_PASSWORD: openchami
+      POSTGRES_DB: openchami
+    volumes:
+      - ../fixtures/pg-init.sql:/docker-entrypoint-initdb.d/00-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U openchami -d openchami"]
+      interval: 2s
+      timeout: 3s
+      retries: 60
+    labels:
+      openchami.acceptance.run: ${SBX_DECLARATIVE_COMPOSE_PROJECT:?required}
+  smd:
+    image: ${SBX_SMD_IMAGE:-ghcr.io/openchami/smd:v2.20.5}
+    command: ["/smd", "-dbhost=postgres", "-dbport=5432", "-dbuser=openchami", "-dbname=smd", "-dbtype=postgres", "-dbopts=password=openchami sslmode=disable", "-migrate", "-http-listen=:27779", "-log=2"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports: ["127.0.0.1:${SBX_DECLARATIVE_SMD_HOST_PORT:?required}:27779"]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:27779/hsm/v2/service/ready"]
+      interval: 2s
+      timeout: 3s
+      retries: 60
+    labels:
+      openchami.acceptance.run: ${SBX_DECLARATIVE_COMPOSE_PROJECT:?required}
+  tokensmith-backend:
+    image: ${SBX_TOKENSMITH_IMAGE:-ghcr.io/openchami/tokensmith:v0.4.2}
+    entrypoint: ["/sbin/tini", "--"]
+    command: ["tokensmith", "serve", "--port=27780", "--issuer=http://tokensmith:27780", "--oidc-issuer=http://tokensmith:27780", "--cluster-id=sandbox", "--openchami-id=sandbox", "--key-dir=/tokensmith/keys", "--rfc8693-bootstrap-store=/tokensmith/data/bootstrap-tokens", "--rfc8693-refresh-store=/tokensmith/data/refresh-tokens", "--enable-local-user-mint", "--non-enforcing"]
+    environment:
+      TOKENSMITH_CONFIG: ""
+    tmpfs: ["/tokensmith/keys:mode=1777", "/tokensmith/data:mode=1777"]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:27780/.well-known/jwks.json"]
+      interval: 2s
+      timeout: 3s
+      retries: 60
+    labels:
+      openchami.acceptance.run: ${SBX_DECLARATIVE_COMPOSE_PROJECT:?required}
+  tokensmith:
+    image: ${SBX_DECLARATIVE_FIXTURE_IMAGE:?required}
+    command: ["serve", "--listen", ":27780", "--upstream", "http://tokensmith-backend:27780", "--issuer", "http://tokensmith:27780", "--keys-dir", "/fixture-keys"]
+    tmpfs: ["/fixture-keys:mode=1777"]
+    depends_on:
+      tokensmith-backend:
+        condition: service_healthy
+    ports: ["127.0.0.1:${SBX_DECLARATIVE_TOKENSMITH_HOST_PORT:?required}:27780"]
+    labels:
+      openchami.acceptance.run: ${SBX_DECLARATIVE_COMPOSE_PROJECT:?required}
+  boot:
+    image: ${SBX_DECLARATIVE_BOOT_IMAGE:?required}
+    command: ["serve", "--config=/run/boot-config/boot.json", "--port=27790", "--data-dir=/data", "--auth-enabled=true", "--hsm-url=http://smd:27779", "--tokensmith-url=http://tokensmith:27780", "--enable-legacy-api=true", "--enable-metrics=true", "--metrics-port=27791"]
+    environment:
+      TOKENSMITH_JWKS_URL: http://tokensmith:27780/.well-known/jwks.json
+    volumes: ["${SBX_DECLARATIVE_RUN_DIR:?required}/data/boot:/data", "${SBX_DECLARATIVE_BOOT_CONFIG_DIR:?required}:/run/boot-config:ro"]
+    ports: ["127.0.0.1:${SBX_DECLARATIVE_BOOT_HOST_PORT:?required}:27790"]
+    labels:
+      openchami.acceptance.run: ${SBX_DECLARATIVE_COMPOSE_PROJECT:?required}
+  boot-auth-off:
+    image: ${SBX_DECLARATIVE_BOOT_IMAGE:?required}
+    command: ["serve", "--port=27790", "--data-dir=/data", "--auth-enabled=false", "--hsm-url=http://smd:27779", "--enable-legacy-api=true"]
+    volumes: ["${SBX_DECLARATIVE_RUN_DIR:?required}/data/auth-off:/data"]
+    ports: ["127.0.0.1:${SBX_DECLARATIVE_AUTH_OFF_HOST_PORT:?required}:27790"]
+    labels:
+      openchami.acceptance.run: ${SBX_DECLARATIVE_COMPOSE_PROJECT:?required}
